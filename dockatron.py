@@ -4,14 +4,13 @@ from rich.align import Align
 from rich.console import RenderableType
 from rich.panel import Panel
 from rich.pretty import Pretty
+from rich.screen import Screen
 from rich.style import Style
 from textual import events
 from textual.widget import Reactive, Widget
+from textual.widgets import Button, ButtonPressed
 from textual.app import App
 from textual.keys import Keys
-
-#print(events.Leave.__doc__)
-#1/0
 
 @rich.repr.auto(angular=False)
 class Placeholder(Widget, can_focus=True):
@@ -111,78 +110,66 @@ class Placeholder2(Widget, can_focus=True):
             self.has_focus = True
 
 @rich.repr.auto(angular=False)
-class GridButton(Widget, can_focus=True):
-
-    has_focus: Reactive[bool] = Reactive(False)
-    mouse_over: Reactive[bool] = Reactive(False)
-    keypress: Reactive[str] = Reactive("")
-    style: Reactive[str] = Reactive("")
-    height: Reactive[int] = Reactive(None)
-
-    def __init__(self, *, name: str = None, height: int = None) -> None:
-        super().__init__(name=name)
-        self.height = height
-        self.text = "Click here to dock"
-        self.title = name
-        self.style = Style(color="white", bgcolor="green", encircle=True)
-
-    def render(self) -> RenderableType:
-        return Panel(
-            Align.center(self.text, vertical="middle"),
-            border_style="red" if self.has_focus else "green",
-            box=box.HEAVY if self.has_focus else box.ROUNDED,
-            title=self.title,
-            style=self.style,
-        )
-
+class GridButton(Button):
+    # ButtonPressed does not work
+    #async def on_button_pressed(self, message: ButtonPressed) -> None:
     async def on_focus(self, event: events.Focus) -> None:
         self.has_focus = True
-        start_docking()
+        self.start_docking()
+        print("on focus")
 
-    async def on_blur(self, event: events.Blur) -> None:
-         self.has_focus = False
+    def start_docking(self):
+        raise SystemExit(dir(self)) #.output.text = "ASDF"
 
 
 
 class GridTest(App):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.log_verbosity = 9
+        self.grid = None
+
     async def on_mount(self) -> None:
         """Make a simple grid arrangement."""
 
-        grid = await self.view.dock_grid(edge="right", name="grid")
+        self.log_verbosity = 9
+        self.grid = await self.view.dock_grid(edge="right", name="grid")
+        grid = self.grid
 
-        grid.add_column(fraction=1, name="left")
-        grid.add_column(fraction=2, name="center")
-        grid.add_column(fraction=1, name="right")
+        grid.add_column(fraction=1, name="l1")
+        grid.add_column(fraction=1, name="l2")
+        grid.add_column(fraction=6, name="right")
 
         grid.add_row(fraction=1, name="r1")
         grid.add_row(fraction=1, name="r2")
         grid.add_row(fraction=1, name="r3")
         grid.add_row(fraction=1, name="r4")
         grid.add_row(fraction=1, name="r5")
-        grid.add_row(fraction=1, name="r6")
 
         grid.add_areas(
-            area1="left,r1",
-            area2="left,r2",
-            area3="left,r3",
-            area4="left,r4",
-            area5="left,r5",
-            area6="left,r6",
-            progress="center-start|right-end,r1-start|r6-end"
+            dl_1="l1-start|l2-end,r1",
+            dl_2="l1-start|l2-end,r2",
+            enter_protein="l1,r3",
+            enter_proteome="l2,r3",
+            enter_pubchem="l1,r4",
+            enter_smiles="l2,r4",
+            start_docking="l1-start|l2-end,r5",
+            output="right,r1-start|r5-end"
         )
 
         grid.place(
-            area1=Placeholder(name="Download stuff 1"),
-            area2=Placeholder(name="Download stuff 2"),
-            area3=Placeholder(name="Download stuff 3"),
-            area4=Placeholder2(name="Enter Pubchem ID"),
-            area5=Placeholder2(name="Enter SMILES"),
-            area6=GridButton(name=""),
-            progress=Placeholder2(name="Progress"),
+            dl_1=Placeholder(name="Download stuff 1"),
+            dl_2=Placeholder(name="Download stuff 2"),
+            enter_proteome=Placeholder2(name="Enter UniProt ID"),
+            enter_protein=Placeholder2(name="Enter Proteome"),
+            enter_pubchem=Placeholder2(name="Enter Pubchem ID"),
+            enter_smiles=Placeholder2(name="Enter SMILES"),
+            start_docking=GridButton(label="Start docking", name="go"),
+            output=Placeholder2(name="Output"),
         )
 
 
-def start_docking():
-    GridTest.post_message(GridTest, message="start")
-
-GridTest.run(title="Grid Test", log="textual.log")
+myapp = GridTest.run(title="Grid Test", log="textual.log")
+# never gets here!
+print(myapp)
+raise SystemExit(str(myapp))

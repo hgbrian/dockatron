@@ -7,9 +7,12 @@ from tqdm.auto import tqdm
 from tqdm.dask import TqdmCallback
 from contextlib import contextmanager
 from datetime import datetime
-from tempfile import TemporaryDirectory, NamedTemporaryFile
+from tempfile import TemporaryDirectory, NamedTemporaryFile, gettempdir
+
+tempdir = gettempdir()
 
 # taken from EquiBind's default inference.yml
+# could be replaced with command line args
 config_yaml = """run_dirs:
   - flexible_self_docking # the resulting coordinates will be saved here as tensors in a .pt file (but also as .sdf files if you specify an "output_directory" below)
 inference_path: '{input_dir}' # this should be your input file path as described in the main readme
@@ -43,7 +46,8 @@ def download_sdf(sm_id: str):
 
     return sdf_2d, sdf_3d
 
-def smina_score(pdb_file: str, sdf_file: str, scoring="minimize"):    
+def smina_score(pdb_file: str, sdf_file: str, scoring="minimize"):
+    """Use smina to score a docked position"""
     if scoring == "minimize":
         opt = ["--local_only", "--minimize"]
     elif scoring == "score_only":
@@ -64,7 +68,7 @@ def smina_score(pdb_file: str, sdf_file: str, scoring="minimize"):
 
 
 def run_equibind(yeast_or_human: str, sm_id: str, output_dir=None, friendly_id=None):
-
+    """Run equibind against a proteome"""
     proteome_dir = os.path.abspath(f"{yeast_or_human}_proteome")
 
     if "." in sm_id:
@@ -78,7 +82,7 @@ def run_equibind(yeast_or_human: str, sm_id: str, output_dir=None, friendly_id=N
 
     today = datetime.now().isoformat()[:10].replace("-","").replace("20220326", "20220325")
     if not output_dir:
-        output_dir = f"/tmp/{today}_{yeast_or_human}_{friendly_id}"
+        output_dir = os.path.join(tempdir, f"{today}_{yeast_or_human}_{friendly_id}")
 
     scores = []
     df_uniprot = pd.read_csv(f"uniprot_{yeast_or_human}.tsv", sep='\t')[["Entry", "Gene names", "Entry name"]]
@@ -96,17 +100,19 @@ def run_equibind(yeast_or_human: str, sm_id: str, output_dir=None, friendly_id=N
         
         print("Linking files")
         subprocess.run(f"cp -as {os.path.abspath(proteome_dir).rstrip('/')+'/*'} {input_dir}", shell=True)
-        for dr in os.listdir(input_dir):
+        for dr in tqdm(os.listdir(input_dir)):
             subprocess.run(["cp", "-as", os.path.abspath(sdf_file.name), os.path.join(input_dir, dr)])
 
-        print("Running equibind")
+        print("Running EquiBind")
         with using_directory("EquiBind"):
             with subprocess.Popen(["conda", "run", "-n", "equibind",
-                "python", "inference.py", f"--config={config_file.name}" ],
-                bufsize=1, stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as p:
-            
-                for line in tqdm((l for l in p.stdout if l.decode().startswith("Processing")), total=len(df_uniprot)):
-                    pass
+                "python", "-u", "inference.py", f"--config={config_file.name}" ],
+                bufsize=1, universal_newlines=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE) as p:
+
+                # TODO fix this something went wrong
+                #for line in tqdm((l for l in p.stdout if l.decode().startswith("Processing")), total=len(df_uniprot)):
+                #    pass
             
                 print(f"wrote equibind results to {output_dir}")
 

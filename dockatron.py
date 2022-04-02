@@ -2,15 +2,20 @@ import rich
 from rich import box
 from rich.align import Align
 from rich.console import RenderableType
+from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.pretty import Pretty
 from rich.screen import Screen
 from rich.style import Style
 from textual import events
+from textual.message import Message
 from textual.widget import Reactive, Widget
-from textual.widgets import Button, ButtonPressed
+from textual.widgets import Button, ButtonPressed, ScrollView
 from textual.app import App
 from textual.keys import Keys
+
+proteome = None
+
 
 @rich.repr.auto(angular=False)
 class Placeholder(Widget, can_focus=True):
@@ -114,13 +119,15 @@ class GridButton(Button):
     # ButtonPressed does not work
     #async def on_button_pressed(self, message: ButtonPressed) -> None:
     async def on_focus(self, event: events.Focus) -> None:
+        #print("on focus")
         self.has_focus = True
         self.start_docking()
-        print("on focus")
 
     def start_docking(self):
-        raise SystemExit(dir(self)) #.output.text = "ASDF"
-
+        pass
+        # i have to post a real Message object here
+        self.post_message_from_child_no_wait(Message(self))
+        #raise SystemExit(dir(self)) #.output.text = "ASDF"
 
 
 class GridTest(App):
@@ -128,6 +135,11 @@ class GridTest(App):
         super().__init__()
         self.log_verbosity = 9
         self.grid = None
+
+    async def on_message(self, message):
+        if message.sender.name =="go":
+            readme = Markdown("# Equibind -> /tmp/20220402_yeast_zearalenone\nasdf", hyperlinks=True)
+            await self.output.update(readme)
 
     async def on_mount(self) -> None:
         """Make a simple grid arrangement."""
@@ -157,6 +169,8 @@ class GridTest(App):
             output="right,r1-start|r5-end"
         )
 
+        self.output = ScrollView(name="Output", gutter=1)
+
         grid.place(
             dl_1=Placeholder(name="Download stuff 1"),
             dl_2=Placeholder(name="Download stuff 2"),
@@ -165,11 +179,16 @@ class GridTest(App):
             enter_pubchem=Placeholder2(name="Enter Pubchem ID"),
             enter_smiles=Placeholder2(name="Enter SMILES"),
             start_docking=GridButton(label="Start docking", name="go"),
-            output=Placeholder2(name="Output"),
+            output=self.output,
         )
+
+        async def get_markdown(filename: str) -> None:
+            readme = Markdown("# Output", hyperlinks=True)
+            await self.output.update(readme)
+        await self.call_later(get_markdown, "richreadme.md")
 
 
 myapp = GridTest.run(title="Grid Test", log="textual.log")
 # never gets here!
-print(myapp)
-raise SystemExit(str(myapp))
+#print(myapp)
+#raise SystemExit(str(myapp))

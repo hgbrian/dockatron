@@ -146,16 +146,15 @@ class GridButton(Button):
     def start_docking(self):
         self.post_message_from_child_no_wait(Message(self))
 
-    def handle_button_pressed(self, message: ButtonPressed) -> None:
-        print("Button pressed")
-        self.start_docking()
-        self.label = "Docking..."
-        self.button_style = "white on dark_green"
+    # def handle_button_pressed(self, message: ButtonPressed) -> None:
+    #     print("Button pressed")
+    #     self.start_docking()
+    #     self.label = "Docking..."
+    #     self.button_style = "white on dark_green"
 
 class GridTest(App):
     def __init__(self, *args, **kwargs):
-        super().__init__()
-        self.log_verbosity = 9
+        super().__init__(*args, **kwargs)
         self.grid = None
         self.row = 0
         self.col = 1
@@ -175,6 +174,9 @@ class GridTest(App):
 
     async def handle_button_pressed(self, message: ButtonPressed) -> None:
         if message.sender.name == "Start docking":
+            message.sender.label = "Docking..."
+            message.sender.button_style = "white on dark_green"
+
             readme = Markdown("# Equibind -> /tmp/20220402_yeast_zearalenone\nasdf", hyperlinks=True)
             await self.output.update(readme)
             self.set_timer(1, self._update_output)
@@ -190,7 +192,7 @@ class GridTest(App):
         for child in self.children:
             if hasattr(child, "row") and hasattr(child, "col"):
                 if child.row == self.row and child.col == self.col:
-                    await child.on_focus(event=events.Focus)
+                    await self.set_focus(child)
                 else:
                     await child.on_blur(event=events.Blur)
                 #else:
@@ -220,7 +222,6 @@ class GridTest(App):
     async def on_mount(self) -> None:
         """Make a simple grid arrangement."""
 
-        self.log_verbosity = 9
         self.grid = await self.view.dock_grid(edge="right", name="grid")
         grid = self.grid
 
@@ -265,7 +266,4 @@ class GridTest(App):
         await self.call_later(get_markdown, "richreadme.md")
 
 
-myapp = GridTest.run(title="Grid Test", log="textual.log")
-# never gets here!
-#print(myapp)
-#raise SystemExit(str(myapp))
+GridTest.run(log="textual.log")

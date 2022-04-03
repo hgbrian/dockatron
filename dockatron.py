@@ -5,8 +5,9 @@ from rich.console import RenderableType
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.pretty import Pretty
+from rich.progress import Progress, track
 from rich.screen import Screen
-from rich.style import Style
+from rich.style import Style, StyleType
 from textual import events
 from textual.message import Message
 from textual.widget import Reactive, Widget
@@ -14,6 +15,7 @@ from textual.widgets import Button, ButtonPressed, ScrollView
 from textual.app import App
 from textual.keys import Keys
 
+import time
 proteome = None
 
 
@@ -25,9 +27,11 @@ class Placeholder(Widget, can_focus=True):
     style: Reactive[str] = Reactive("")
     height: Reactive = Reactive(None)
 
-    def __init__(self, *, name: str = None, height: int = None) -> None:
+    def __init__(self, *, name: str = None, height: int = None, row:int = None, col:int = None) -> None:
         super().__init__(name=name)
         self.height = height
+        self.row = row
+        self.col = col
 
     def __rich_repr__(self) -> rich.repr.Result:
         yield "name", self.name
@@ -69,11 +73,13 @@ class Placeholder2(Widget, can_focus=True):
     style: Reactive[str] = Reactive("")
     height: Reactive[int] = Reactive(None)
 
-    def __init__(self, *, name: str = None, height: int = None) -> None:
+    def __init__(self, *, name: str = None, height: int = None, row:int = None, col:int = None) -> None:
         super().__init__(name=name)
         self.height = height
         self.text = ""
         self.title = name
+        self.row = row
+        self.col = col
 
     def __rich_repr__(self) -> rich.repr.Result:
         yield "???????????"
@@ -102,44 +108,99 @@ class Placeholder2(Widget, can_focus=True):
     #     self.mouse_over = False
 
     async def on_key(self, event: events.Key):
-        #print("event", event, event.key)
-        if event.key == Keys.Enter:
-            self.has_focus = False
-        elif event.key == Keys.ControlH:
+        #if event.key == Keys.Enter:
+        #    self.has_focus = False
+        if event.key == Keys.ControlH:
             self.text = self.text[:-1]
-            self.has_focus = False
-            self.has_focus = True
-        if self.has_focus and len(event.key)==1:
+            self.refresh()
+        elif self.has_focus and len(event.key)==1:
             self.text = self.text + event.key
-            self.has_focus = False
-            self.has_focus = True
+            self.refresh()
 
 @rich.repr.auto(angular=False)
 class GridButton(Button):
+    def __init__(self, label:str, *, name: str = None, row:int = None, col:int = None) -> None:
+        super().__init__(label)
+        self.row = row
+        self.col = col
+
     # ButtonPressed does not work
     #async def on_button_pressed(self, message: ButtonPressed) -> None:
     async def on_focus(self, event: events.Focus) -> None:
         #print("on focus")
         self.has_focus = True
         self.start_docking()
+        self.label = "Docking..."
+        self.button_style = "white on dark_green"
 
     def start_docking(self):
-        pass
-        # i have to post a real Message object here
         self.post_message_from_child_no_wait(Message(self))
-        #raise SystemExit(dir(self)) #.output.text = "ASDF"
 
+    def handle_button_pressed(self, message: ButtonPressed) -> None:
+        print("Button pressed")
 
 class GridTest(App):
     def __init__(self, *args, **kwargs):
         super().__init__()
         self.log_verbosity = 9
         self.grid = None
+        self.row = 0
+        self.col = 1
 
-    async def on_message(self, message):
-        if message.sender.name =="go":
+    async def on_load(self) -> None:
+        """Bind keys here."""
+        await self.bind(Keys.Up, "move_up", "move up")
+        await self.bind(Keys.Down, "move_down", "move down")
+        await self.bind(Keys.Left, "move_left", "move left")
+        await self.bind(Keys.Right, "move_right", "move right")
+        
+    async def _update_output(self):
+        readme = Markdown("# Equibind2 -> /tmp/20220402_yeast_zearalenone\nasdf", hyperlinks=True)
+        await self.output.update(readme)
+        #readme = "ASDF" #self.output.text + "\n\nupdate"
+        #await self.output.update(readme)
+
+    async def handle_button_pressed(self, message: ButtonPressed) -> None:
+        if message.sender.name == "Start docking":
             readme = Markdown("# Equibind -> /tmp/20220402_yeast_zearalenone\nasdf", hyperlinks=True)
             await self.output.update(readme)
+            self.set_timer(1, self._update_output)
+            #s = []
+            #for a in dir(self):
+            #    try:
+            #        s.append(a + " " + str(getattr(self, a)))
+            #    except:
+            #        pass
+            #raise SystemExit('\n'.join(s))
+
+    async def _change_focus(self) -> None:
+        for child in self.children:
+            if hasattr(child, "row") and hasattr(child, "col"):
+                if child.row == self.row and child.col == self.col:
+                    await child.on_focus(event=events.Focus)
+                #else:
+                #    child.has_focus = False
+        
+    async def action_move_up(self) -> None:
+        self.row = max(1, self.row - 1)
+        await self._change_focus()
+
+    async def action_move_down(self) -> None:
+        self.row = min(5, self.row + 1)
+        await self._change_focus()
+
+    async def action_move_left(self) -> None:
+        self.col = max(1, self.col - 1)
+        await self._change_focus()
+
+    async def action_move_right(self) -> None:
+        self.col = min(2, self.row + 1)
+        await self._change_focus()
+
+    # I think this grabs messages before handle_button_pressed got to them?
+    #async def on_message(self, message):
+    #    if message.sender.name == "Start docking":
+    #        print(message)
 
     async def on_mount(self) -> None:
         """Make a simple grid arrangement."""
@@ -172,19 +233,20 @@ class GridTest(App):
         self.output = ScrollView(name="Output", gutter=1)
 
         grid.place(
-            dl_1=Placeholder(name="Download stuff 1"),
-            dl_2=Placeholder(name="Download stuff 2"),
-            enter_proteome=Placeholder2(name="Enter UniProt ID"),
-            enter_protein=Placeholder2(name="Enter Proteome"),
-            enter_pubchem=Placeholder2(name="Enter Pubchem ID"),
-            enter_smiles=Placeholder2(name="Enter SMILES"),
-            start_docking=GridButton(label="Start docking", name="go"),
+            dl_1=Placeholder2(name="Download stuff 1", row=1, col=1),
+            dl_2=Placeholder2(name="Download stuff 2", row=2, col=1),
+            enter_protein=Placeholder2(name="Enter Proteome", row=3, col=1),
+            enter_proteome=Placeholder2(name="Enter UniProt ID", row=3, col=2),
+            enter_pubchem=Placeholder2(name="Enter Pubchem ID", row=4, col=1),
+            enter_smiles=Placeholder2(name="Enter SMILES", row=4, col=2),
+            start_docking=GridButton(label="Start docking", name="start_docking", row=5, col=1),
             output=self.output,
         )
 
         async def get_markdown(filename: str) -> None:
-            readme = Markdown("# Output", hyperlinks=True)
+            readme = Markdown(f"# Output\n{time.time()}", hyperlinks=True)
             await self.output.update(readme)
+
         await self.call_later(get_markdown, "richreadme.md")
 
 

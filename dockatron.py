@@ -125,19 +125,32 @@ class GridButton(Button):
         self.col = col
 
     # ButtonPressed does not work
-    #async def on_button_pressed(self, message: ButtonPressed) -> None:
     async def on_focus(self, event: events.Focus) -> None:
-        #print("on focus")
         self.has_focus = True
-        self.start_docking()
-        self.label = "Docking..."
-        self.button_style = "white on dark_green"
+        self.label = "[ Start docking ]"
+        self.button_style = "white on blue"
+        self.refresh()
+
+    async def on_blur(self, event: events.Blur) -> None:
+        self.has_focus = False
+        self.label = "Start docking"
+        self.button_style = "white on dark_blue"
+        self.refresh()
+
+    #async def on_click(self, event: events.Click) -> None:
+    #    #self.has_focus = True
+    #    self.start_docking()
+    #    self.label = "Docking..."
+    #    self.button_style = "white on dark_green"
 
     def start_docking(self):
         self.post_message_from_child_no_wait(Message(self))
 
     def handle_button_pressed(self, message: ButtonPressed) -> None:
         print("Button pressed")
+        self.start_docking()
+        self.label = "Docking..."
+        self.button_style = "white on dark_green"
 
 class GridTest(App):
     def __init__(self, *args, **kwargs):
@@ -178,6 +191,8 @@ class GridTest(App):
             if hasattr(child, "row") and hasattr(child, "col"):
                 if child.row == self.row and child.col == self.col:
                     await child.on_focus(event=events.Focus)
+                else:
+                    await child.on_blur(event=events.Blur)
                 #else:
                 #    child.has_focus = False
         

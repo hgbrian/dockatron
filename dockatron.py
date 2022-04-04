@@ -1,5 +1,5 @@
 """
-If you find smina useful, please cite our paper: 
+If you find smina useful, please cite our paper:
 http://pubs.acs.org/doi/abs/10.1021/ci300604z
 """
 import rich
@@ -9,13 +9,14 @@ from rich.console import RenderableType
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.pretty import Pretty
-from rich.progress import Progress, track
+from rich.progress import Progress, track, SpinnerColumn
+from rich.progress_bar import ProgressBar
 from rich.screen import Screen
 from rich.style import Style, StyleType
 from textual import events
 from textual.message import Message
 from textual.widget import Reactive, Widget
-from textual.widgets import Button, ButtonPressed, ScrollView
+from textual.widgets import Button, ButtonPressed, ScrollView, Static
 from textual.app import App
 from textual.keys import Keys
 
@@ -110,7 +111,7 @@ class Placeholder2(Widget, can_focus=True):
 
     def __rich_repr__(self) -> rich.repr.Result:
         yield "???????????"
-    
+
     def render(self) -> RenderableType:
         return Panel(
             Align.left(self.text),
@@ -197,31 +198,26 @@ class GridTest(App):
         await self.bind(Keys.Down, "move_down", "move down")
         await self.bind(Keys.Left, "move_left", "move left")
         await self.bind(Keys.Right, "move_right", "move right")
-        
+
     async def _update_output(self):
         await self.output.update(Markdown('\n'.join(self.output_md), hyperlinks=True))
+        # Test
+        self.output_md.append(install("EquiBind"))
+        self.set_timer(1, self._update_output)
 
     async def handle_button_pressed(self, message: ButtonPressed) -> None:
         if message.sender.name == "Start docking":
             message.sender.label = "Docking..."
             message.sender.button_style = "white on dark_green"
             self.output_md.append(install("EquiBind"))
-
             self.set_timer(1, self._update_output)
-            #s = []
-            #for a in dir(self):
-            #    try:
-            #        s.append(a + " " + str(getattr(self, a)))
-            #    except:
-            #        pass
-            #raise SystemExit('\n'.join(s))
 
     async def _change_focus(self) -> None:
         for child in self.children:
             if hasattr(child, "row") and hasattr(child, "col"):
                 if child.row == self.row and child.col == self.col:
                     await self.set_focus(child)
-        
+
     async def action_move_up(self) -> None:
         self.row = max(1, self.row - 1)
         await self._change_focus()
@@ -267,10 +263,17 @@ class GridTest(App):
             enter_pubchem="l1,r4",
             enter_smiles="l2,r4",
             start_docking="l1-start|l2-end,r5",
-            output="right,r1-start|r5-end"
+            output="right,r1-start|r4-end",
+            progress="right,r5"
         )
 
         self.output = ScrollView(name="Output", gutter=1)
+
+
+        self.progress_bar = Progress()
+        task1 = self.progress_bar.add_task("[red]Downloading:", total=1000)
+        self.progress_bar.update(task1, advance=100)
+        self.progress_panel = Static(name="Progess", renderable=Align.center(self.progress_bar, vertical="middle"))
 
         grid.place(
             dl_1=Placeholder2(name="Download stuff 1", row=1, col=1),
@@ -279,10 +282,12 @@ class GridTest(App):
             enter_proteome=Placeholder2(name="Enter UniProt ID", row=3, col=2),
             enter_pubchem=Placeholder2(name="Enter Pubchem ID", row=4, col=1),
             enter_smiles=Placeholder2(name="Enter SMILES", row=4, col=2),
-            start_docking=GridButton(label="Start docking", name="start_docking", row=5, col=1),
+            start_docking=GridButton(name="start_docking", label="Start docking", row=5, col=1),
             output=self.output,
+            progress=self.progress_panel,
         )
 
+        # hmm, this has to be at the end of the class to work
         async def get_markdown(filename: str) -> None:
             readme = Markdown(f"# Output\n{time.time()}", hyperlinks=True)
             await self.output.update(readme)

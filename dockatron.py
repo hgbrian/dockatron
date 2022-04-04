@@ -20,16 +20,36 @@ from textual.widgets import Button, ButtonPressed, ScrollView, Static
 from textual.app import App
 from textual.keys import Keys
 
+import sys
 import time
+import requests
 import subprocess
 
+if sys.platform in {"linux", "linux2"}:
+    platform = "linux"
+elif sys.platform == "darwin":
+    platform = "osx"
+else:
+    raise ValueError(f"{sys.platform} not supported")
+
 URLS = {
-    "equibind": "https://github.com/HannesStark/EquiBind",
-    "gnina_linux": "https://github.com/gnina/gnina/releases/download/v1.0/gnina",
-    "smina_linux": "https://sourceforge.net/projects/smina/files/smina.static/download",
-    "smina_mac": "https://sourceforge.net/projects/smina/files/smina.osx/download",
-    "smina_mac12": "https://sourceforge.net/projects/smina/files/smina.osx.12/download",
+    ("equibind", "linux"): "https://github.com/HannesStark/EquiBind",
+    ("gnina", "linux"): "https://github.com/gnina/gnina/releases/download/v1.0/gnina",
+    ("smina", "linux"): "https://sourceforge.net/projects/smina/files/smina.static/download",
+    ("smina", "osx"): "https://sourceforge.net/projects/smina/files/smina.osx/download",
+    ("smina", "osx12"): "https://sourceforge.net/projects/smina/files/smina.osx.12/download",
+    ("proteome", "yeast"): "https://ftp.ebi.ac.uk/pub/databases/alphafold/latest/UP000002311_559292_YEAST_v2.tar",
 }
+
+def gen_dl(url, chunk_size=1024*1024, out_file=None):
+    resp = requests.get(url, stream=True)
+    total = int(resp.headers.get('content-length', 0))
+    yield total // chunk_size
+    with open(out_file or url.split('/')[-1], 'wb') as out:
+        for data in resp.iter_content(chunk_size=chunk_size):
+            out.write(data)
+            yield
+
 
 def install(software_name):
     msg = []
@@ -44,6 +64,12 @@ def install(software_name):
     elif software_name == "gnina":
         p = subprocess.run(["echo", "wget", URLS["gnina_linux"]])
         msg.append(p.stdout.decode())
+    elif software_name == "yeast_proteome":
+        p = subprocess.run(["echo", "wget", URLS["yeast_proteome"]], bufsize=1, universal_newlines=True)
+        msg.append(p.stdout.decode())
+        p = subprocess.run(["echo", "tar", "xvf", URLS["yeast_proteome"].split('/')[-1]])
+        msg.append(p.stdout.decode())
+
     return ''.join(msg)
 
 
@@ -137,7 +163,7 @@ class Placeholder2(Widget, can_focus=True):
 
     async def on_key(self, event: events.Key):
         if event.key == Keys.Enter:
-            self.emit(ButtonPressed(self))
+            await self.emit(ButtonPressed(self))
         elif event.key == Keys.ControlH:
             self.text = self.text[:-1]
             self.refresh()
@@ -211,6 +237,15 @@ class GridTest(App):
             message.sender.button_style = "white on dark_green"
             self.output_md.append(install("EquiBind"))
             self.set_timer(1, self._update_output)
+        elif message.sender.name == "Download smina":
+            dl_gener = gen_dl(URLS[("smina", platform)])
+            dl_total = next(dl_gener)
+            dl_task = self.progress_bar.add_task("[red]Downloading smina:", total=dl_total)
+            for _ in iter(dl_gener):
+                self.progress_bar.update(dl_task, advance=1)
+                # both refreshes necessary!
+                self.progress_panel.refresh()
+                self.refresh()
 
     async def _change_focus(self) -> None:
         for child in self.children:
@@ -267,12 +302,9 @@ class GridTest(App):
             progress="right,r5"
         )
 
+        # Right hand side panels
         self.output = ScrollView(name="Output", gutter=1)
-
-
         self.progress_bar = Progress()
-        task1 = self.progress_bar.add_task("[red]Downloading:", total=1000)
-        self.progress_bar.update(task1, advance=100)
         self.progress_panel = Static(name="Progess", renderable=Align.center(self.progress_bar, vertical="middle"))
 
         grid.place(

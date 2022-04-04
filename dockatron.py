@@ -23,6 +23,7 @@ from rich.pretty import Pretty
 from rich.progress import Progress, track, SpinnerColumn
 from rich.progress_bar import ProgressBar
 from rich.screen import Screen
+from rich.status import Status
 from rich.style import Style, StyleType
 from textual import events
 from textual.message import Message
@@ -36,6 +37,9 @@ import time
 import requests
 import subprocess
 
+# -------------------------------------------------------------------------------------------------
+# Globals
+#
 if sys.platform in {"linux", "linux2"}:
     platform = "linux"
 elif sys.platform == "darwin":
@@ -44,7 +48,7 @@ else:
     raise ValueError(f"{sys.platform} not supported")
 
 URLS = {
-    ("equibind", "linux"): "https://github.com/HannesStark/EquiBind",
+    ("equibind", "linux"): "https://github.com/HannesStark/EquiBind/archive/refs/heads/main.zip",
     ("gnina", "linux"): "https://github.com/gnina/gnina/releases/download/v1.0/gnina",
     ("smina", "linux"): "https://sourceforge.net/projects/smina/files/smina.static/download",
     ("smina", "osx"): "https://sourceforge.net/projects/smina/files/smina.osx/download",
@@ -55,6 +59,7 @@ URLS = {
 
 
 def gen_dl(url, chunk_size=1_048_576, out_file=None):
+    """Generator for downloading files"""
     resp = requests.get(url, stream=True)
     total = int(resp.headers.get('content-length', 0))
     yield total // chunk_size
@@ -67,23 +72,24 @@ def gen_dl(url, chunk_size=1_048_576, out_file=None):
 def install(software_name):
     msg = []
     if software_name == "EquiBind":
-        p = subprocess.run(["echo", "git", "clone", URLS["equibind"]], capture_output=True)
+        p = subprocess.run(["echo", "git", "clone", URLS[("equibind", platform)]], capture_output=True)
         msg.append(p.stdout.decode())
-        subprocess.run(["echo", "conda", "env", "create", "-f", "environment.yml"], capture_output=True)
+        msg.append("`Done`")
+        p = subprocess.run(["echo", "conda", "env", "create", "-f", "environment.yml"], capture_output=True)
         msg.append(p.stdout.decode())
     elif software_name == "smina":
-        p = subprocess.run(["echo", "wget", URLS["smina"]])
+        p = subprocess.run(["echo", "wget", URLS[("smina", platform)]])
         msg.append(p.stdout.decode())
     elif software_name == "gnina":
-        p = subprocess.run(["echo", "wget", URLS["gnina_linux"]])
+        p = subprocess.run(["echo", "wget", URLS[("gnina", platform)]])
         msg.append(p.stdout.decode())
     elif software_name == "yeast_proteome":
-        p = subprocess.run(["echo", "wget", URLS["yeast_proteome"]], bufsize=1, universal_newlines=True)
+        p = subprocess.run(["echo", "wget", URLS[("proteome", "yeast")]], bufsize=1, universal_newlines=True)
         msg.append(p.stdout.decode())
-        p = subprocess.run(["echo", "tar", "xvf", URLS["yeast_proteome"].split('/')[-1]])
+        p = subprocess.run(["echo", "tar", "xvf", URLS[("proteome", "yeast")].split('/')[-1]])
         msg.append(p.stdout.decode())
 
-    return ''.join(msg)
+    return '\n'.join(msg)
 
 
 @rich.repr.auto(angular=False)
@@ -194,13 +200,13 @@ class GridButton(Button):
     # ButtonPressed does not work
     async def on_focus(self, event: events.Focus) -> None:
         self.has_focus = True
-        self.label = "[ Start docking ]"
+        self.label = "[ " + self.label + " ]"
         self.button_style = "white on blue"
         self.refresh()
 
     async def on_blur(self, event: events.Blur) -> None:
         self.has_focus = False
-        self.label = "Start docking"
+        self.label = self.label.lstrip("[").rstrip("]").strip()
         self.button_style = "white on dark_blue"
         self.refresh()
 
@@ -240,9 +246,28 @@ class GridTest(App):
 
     async def _update_output(self):
         await self.output.update(Markdown('\n'.join(self.output_md), hyperlinks=True))
-        # Test
-        self.output_md.append(install("EquiBind"))
-        self.set_timer(1, self._update_output)
+
+    async def _download_file(self, message_sender, url, name):
+        message_sender.label = Status(f"Downloading {name}...")
+        message_sender.button_style = "white on dark_green"
+
+        dl_gener = gen_dl(url)
+        dl_total = next(dl_gener)
+
+        # These two lines appears to be necessary to show the progress update???
+        self.output_md.append(f"Downloading {name}\n")
+        await self._update_output()
+
+        dl_task = self.progress_bar.add_task(f"[red]Downloading {name}:", total=dl_total)
+        for _ in iter(dl_gener):
+            self.progress_bar.update(dl_task, advance=1)
+            # Both refreshes are necessary!!!
+            self.progress_panel.refresh()
+            self.refresh()
+
+        message_sender.label = f"{name} downloaded"
+        self.output_md.append(f"Downloaded {name}")
+        await self._update_output()
 
     async def handle_button_pressed(self, message: ButtonPressed) -> None:
         if message.sender.name == "Start docking":
@@ -250,15 +275,10 @@ class GridTest(App):
             message.sender.button_style = "white on dark_green"
             self.output_md.append(install("EquiBind"))
             self.set_timer(1, self._update_output)
+        elif message.sender.label == "Download EquiBind":
+            await self._download_file(message.sender, URLS[("equibind", platform)], "EquiBind")
         elif message.sender.name == "Download smina":
-            dl_gener = gen_dl(URLS[("smina", platform)])
-            dl_total = next(dl_gener)
-            dl_task = self.progress_bar.add_task("[red]Downloading smina:", total=dl_total)
-            for _ in iter(dl_gener):
-                self.progress_bar.update(dl_task, advance=1)
-                # both refreshes necessary!
-                self.progress_panel.refresh()
-                self.refresh()
+            await self._download_file(message.sender, URLS[("smina", platform)], "smina")
 
     async def _change_focus(self) -> None:
         for child in self.children:
@@ -304,8 +324,8 @@ class GridTest(App):
         grid.add_row(fraction=1, name="r5")
 
         grid.add_areas(
-            dl_1="l1-start|l2-end,r1",
-            dl_2="l1-start|l2-end,r2",
+            dl_equibind="l1-start|l2-end,r1",
+            dl_smina="l1-start|l2-end,r2",
             enter_protein="l1,r3",
             enter_proteome="l2,r3",
             enter_pubchem="l1,r4",
@@ -321,8 +341,8 @@ class GridTest(App):
         self.progress_panel = Static(name="Progess", renderable=Align.center(self.progress_bar, vertical="middle"))
 
         grid.place(
-            dl_1=Placeholder2(name="Download stuff 1", row=1, col=1),
-            dl_2=Placeholder2(name="Download stuff 2", row=2, col=1),
+            dl_equibind=GridButton(name="Download EquiBind", label="Download EquiBind", row=1, col=1),
+            dl_smina=GridButton(name="Download smina", label="Download smina", row=2, col=1),
             enter_protein=Placeholder2(name="Enter Proteome", row=3, col=1),
             enter_proteome=Placeholder2(name="Enter UniProt ID", row=3, col=2),
             enter_pubchem=Placeholder2(name="Enter Pubchem ID", row=4, col=1),
@@ -333,10 +353,10 @@ class GridTest(App):
         )
 
         # hmm, this has to be at the end of this class to work
-        async def get_markdown(filename: str) -> None:
-            readme = Markdown(f"# Output\n{time.time()}", hyperlinks=True)
-            await self.output.update(readme)
+        async def init_markdown() -> None:
+            md = Markdown(f"# Output\n", hyperlinks=True)
+            await self.output.update(md)
 
-        await self.call_later(get_markdown, "richreadme.md")
+        await self.call_later(init_markdown)
 
 GridTest.run(log="textual.log")

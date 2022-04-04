@@ -1,3 +1,7 @@
+"""
+If you find smina useful, please cite our paper: 
+http://pubs.acs.org/doi/abs/10.1021/ci300604z
+"""
 import rich
 from rich import box
 from rich.align import Align
@@ -16,7 +20,30 @@ from textual.app import App
 from textual.keys import Keys
 
 import time
-proteome = None
+import subprocess
+
+URLS = {
+    "equibind": "https://github.com/HannesStark/EquiBind",
+    "gnina_linux": "https://github.com/gnina/gnina/releases/download/v1.0/gnina",
+    "smina_linux": "https://sourceforge.net/projects/smina/files/smina.static/download",
+    "smina_mac": "https://sourceforge.net/projects/smina/files/smina.osx/download",
+    "smina_mac12": "https://sourceforge.net/projects/smina/files/smina.osx.12/download",
+}
+
+def install(software_name):
+    msg = []
+    if software_name == "EquiBind":
+        p = subprocess.run(["echo", "git", "clone", URLS["equibind"]], capture_output=True)
+        msg.append(p.stdout.decode())
+        subprocess.run(["echo", "conda", "env", "create", "-f", "environment.yml"], capture_output=True)
+        msg.append(p.stdout.decode())
+    elif software_name == "smina":
+        p = subprocess.run(["echo", "wget", URLS["smina"]])
+        msg.append(p.stdout.decode())
+    elif software_name == "gnina":
+        p = subprocess.run(["echo", "wget", URLS["gnina_linux"]])
+        msg.append(p.stdout.decode())
+    return ''.join(msg)
 
 
 @rich.repr.auto(angular=False)
@@ -108,9 +135,9 @@ class Placeholder2(Widget, can_focus=True):
     #     self.mouse_over = False
 
     async def on_key(self, event: events.Key):
-        #if event.key == Keys.Enter:
-        #    self.has_focus = False
-        if event.key == Keys.ControlH:
+        if event.key == Keys.Enter:
+            self.emit(ButtonPressed(self))
+        elif event.key == Keys.ControlH:
             self.text = self.text[:-1]
             self.refresh()
         elif self.has_focus and len(event.key)==1:
@@ -137,6 +164,10 @@ class GridButton(Button):
         self.button_style = "white on dark_blue"
         self.refresh()
 
+    async def on_key(self, event: events.Key):
+        if event.key == Keys.Enter:
+            await self.emit(ButtonPressed(self))
+
     #async def on_click(self, event: events.Click) -> None:
     #    #self.has_focus = True
     #    self.start_docking()
@@ -158,6 +189,7 @@ class GridTest(App):
         self.grid = None
         self.row = 0
         self.col = 1
+        self.output_md = ["# Output"]
 
     async def on_load(self) -> None:
         """Bind keys here."""
@@ -167,18 +199,14 @@ class GridTest(App):
         await self.bind(Keys.Right, "move_right", "move right")
         
     async def _update_output(self):
-        readme = Markdown("# Equibind2 -> /tmp/20220402_yeast_zearalenone\nasdf", hyperlinks=True)
-        await self.output.update(readme)
-        #readme = "ASDF" #self.output.text + "\n\nupdate"
-        #await self.output.update(readme)
+        await self.output.update(Markdown('\n'.join(self.output_md), hyperlinks=True))
 
     async def handle_button_pressed(self, message: ButtonPressed) -> None:
         if message.sender.name == "Start docking":
             message.sender.label = "Docking..."
             message.sender.button_style = "white on dark_green"
+            self.output_md.append(install("EquiBind"))
 
-            readme = Markdown("# Equibind -> /tmp/20220402_yeast_zearalenone\nasdf", hyperlinks=True)
-            await self.output.update(readme)
             self.set_timer(1, self._update_output)
             #s = []
             #for a in dir(self):
@@ -193,10 +221,6 @@ class GridTest(App):
             if hasattr(child, "row") and hasattr(child, "col"):
                 if child.row == self.row and child.col == self.col:
                     await self.set_focus(child)
-                else:
-                    await child.on_blur(event=events.Blur)
-                #else:
-                #    child.has_focus = False
         
     async def action_move_up(self) -> None:
         self.row = max(1, self.row - 1)
@@ -264,6 +288,5 @@ class GridTest(App):
             await self.output.update(readme)
 
         await self.call_later(get_markdown, "richreadme.md")
-
 
 GridTest.run(log="textual.log")

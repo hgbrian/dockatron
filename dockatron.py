@@ -1,7 +1,18 @@
 """
-If you find smina useful, please cite our paper:
-http://pubs.acs.org/doi/abs/10.1021/ci300604z
+# Dockatron
+Dockatron relies on the following tools.
+
+## Cite smina
+- http://pubs.acs.org/doi/abs/10.1021/ci300604z
+
+## Cite EquiBind
+- https://arxiv.org/abs/2202.05146
+
+## Cite AlphaFold:
+- Jumper, J et al. Highly accurate protein structure prediction with AlphaFold. Nature (2021).
+- Varadi, M et al. AlphaFold Protein Structure Database: massively expanding the structural coverage of protein-sequence space with high-accuracy models. Nucleic Acids Research (2021).
 """
+
 import rich
 from rich import box
 from rich.align import Align
@@ -39,9 +50,11 @@ URLS = {
     ("smina", "osx"): "https://sourceforge.net/projects/smina/files/smina.osx/download",
     ("smina", "osx12"): "https://sourceforge.net/projects/smina/files/smina.osx.12/download",
     ("proteome", "yeast"): "https://ftp.ebi.ac.uk/pub/databases/alphafold/latest/UP000002311_559292_YEAST_v2.tar",
+    ("proteome", "human"): "https://ftp.ebi.ac.uk/pub/databases/alphafold/latest/UP000005640_9606_HUMAN_v2.tar",
 }
 
-def gen_dl(url, chunk_size=1024*1024, out_file=None):
+
+def gen_dl(url, chunk_size=1_048_576, out_file=None):
     resp = requests.get(url, stream=True)
     total = int(resp.headers.get('content-length', 0))
     yield total // chunk_size
@@ -319,7 +332,7 @@ class GridTest(App):
             progress=self.progress_panel,
         )
 
-        # hmm, this has to be at the end of the class to work
+        # hmm, this has to be at the end of this class to work
         async def get_markdown(filename: str) -> None:
             readme = Markdown(f"# Output\n{time.time()}", hyperlinks=True)
             await self.output.update(readme)

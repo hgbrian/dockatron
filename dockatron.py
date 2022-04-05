@@ -198,7 +198,7 @@ class GridTest(App):
         self.grid = None
         self.row = 0
         self.col = 1
-        self.output_md = ["# Output"]
+        self.output_md = ["# Dockatron Output"]
 
         self.vals = {}
 
@@ -342,12 +342,12 @@ class GridTest(App):
             dl_equibind=GridButton(name="Download EquiBind", label="Download EquiBind", row=1, cols=[1,2,3]),
             dl_smina=GridButton(name="Download smina", label="Download smina", row=2, cols=[1,2,3]),
             # text entry
-            enter_uniprot_id=TextInputPanel(name="Enter UniProt ID", val="uniprot_id", row=3, cols=[1]),
-            enter_gene_name=TextInputPanel(name="Enter Gene name", val="gene_name", row=3, cols=[2]),
-            enter_proteome=TextInputPanel(name="Enter Proteome", val="proteome", row=3, cols=[3]),
-            enter_pubchem=TextInputPanel(name="Enter PubChem ID", val="pubchem_id", row=4, cols=[1]),
-            enter_smiles=TextInputPanel(name="Enter SMILES", val="smiles", row=4, cols=[2]),
-            enter_sdf=TextInputPanel(name="Enter SDF", val="sdf", row=4, cols=[3]),
+            enter_uniprot_id=TextInputPanel(name="UniProt ID", val="uniprot_id", row=3, cols=[1]),
+            enter_gene_name=TextInputPanel(name="Gene name", val="gene_name", row=3, cols=[2]),
+            enter_proteome=TextInputPanel(name="Proteome", val="proteome", row=3, cols=[3]),
+            enter_pubchem=TextInputPanel(name="PubChem ID", val="pubchem_id", row=4, cols=[1]),
+            enter_smiles=TextInputPanel(name="SMILES", val="smiles", row=4, cols=[2]),
+            enter_sdf=TextInputPanel(name="SDF", val="sdf", row=4, cols=[3]),
             # button
             start_docking=GridButton(name="start_docking", label="Start docking", row=5, cols=[1,2,3]),
             output=self.output,
@@ -355,10 +355,9 @@ class GridTest(App):
         )
 
         # hmm, this has to be at the end of this class to work
-        async def init_markdown() -> None:
-            md = Markdown(f"# Dockatron Output\n", hyperlinks=True)
-            await self.output.update(md)
-
-        await self.call_later(init_markdown)
+        #async def init_markdown() -> None:
+        #    md = Markdown(f"# Dockatron Output\n", hyperlinks=True)
+        #    await self.output.update(md)
+        await self.call_later(self._update_output)
 
 GridTest.run(log="textual.log")

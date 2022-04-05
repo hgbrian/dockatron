@@ -27,7 +27,6 @@ from rich.status import Status
 from rich.style import Style, StyleType
 from textual import events
 from textual.app import App
-from textual.events import Key
 from textual.keys import Keys
 from textual.message import Message
 from textual.widget import Reactive, Widget
@@ -230,7 +229,7 @@ class GridTest(App):
             message_sender.label = "Docking..."
             message_sender.button_style = "white on dark_green"
             # test set_timer only
-            self.output_md.append('running EquiBind')
+            self.output_md.append('## Running docking with params')
             self.set_timer(0.1, self._update_output)
 
 

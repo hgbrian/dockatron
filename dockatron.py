@@ -99,52 +99,7 @@ def DEPRECATED_install(software_name):
 
 
 @rich.repr.auto(angular=False)
-class Placeholder(Widget, can_focus=True):
-
-    has_focus: Reactive[bool] = Reactive(False)
-    mouse_over: Reactive[bool] = Reactive(False)
-    style: Reactive[str] = Reactive("")
-    height: Reactive = Reactive(None)
-
-    def __init__(self, *, name: str = None, height: int = None, row:int = None, cols:List = None) -> None:
-        super().__init__(name=name)
-        self.height = height
-        self.row = row
-        self.cols = cols
-
-    def __rich_repr__(self) -> rich.repr.Result:
-        yield "name", self.name
-        yield "has_focus", self.has_focus, False
-        yield "mouse_over", self.mouse_over, False
-
-    def render(self) -> RenderableType:
-        return Panel(
-            Align.center(
-                Pretty(self, no_wrap=True, overflow="ellipsis"), vertical="middle"
-            ),
-            title=self.__class__.__name__,
-            border_style="green" if self.mouse_over else "blue",
-            box=box.HEAVY if self.has_focus else box.ROUNDED,
-            style=self.style,
-            height=self.height,
-        )
-
-    async def on_focus(self, event: events.Focus) -> None:
-        self.has_focus = True
-
-    async def on_blur(self, event: events.Blur) -> None:
-        self.has_focus = False
-
-    async def on_enter(self, event: events.Enter) -> None:
-        self.mouse_over = True
-
-    async def on_leave(self, event: events.Leave) -> None:
-        self.mouse_over = False
-
-
-
-@rich.repr.auto(angular=False)
-class Placeholder2(Widget, can_focus=True):
+class TextInputPanel(Widget, can_focus=True):
 
     has_focus: Reactive[bool] = Reactive(False)
     mouse_over: Reactive[bool] = Reactive(False)
@@ -162,7 +117,7 @@ class Placeholder2(Widget, can_focus=True):
         self.cols = cols
 
     def __rich_repr__(self) -> rich.repr.Result:
-        yield "???????????"
+        yield self.name
 
     def render(self) -> RenderableType:
         return Panel(
@@ -382,12 +337,12 @@ class GridTest(App):
             dl_equibind=GridButton(name="Download EquiBind", label="Download EquiBind", row=1, cols=[1,2,3]),
             dl_smina=GridButton(name="Download smina", label="Download smina", row=2, cols=[1,2,3]),
             # text entry
-            enter_uniprot_id=Placeholder2(name="Enter UniProt ID", val="uniprot_id", row=3, cols=[1]),
-            enter_gene_name=Placeholder2(name="Enter Gene name", val="gene_name", row=3, cols=[2]),
-            enter_proteome=Placeholder2(name="Enter Proteome", val="proteome", row=3, cols=[3]),
-            enter_pubchem=Placeholder2(name="Enter PubChem ID", val="pubchem_id", row=4, cols=[1]),
-            enter_smiles=Placeholder2(name="Enter SMILES", val="smiles", row=4, cols=[2]),
-            enter_sdf=Placeholder2(name="Enter SDF", val="sdf", row=4, cols=[3]),
+            enter_uniprot_id=TextInputPanel(name="Enter UniProt ID", val="uniprot_id", row=3, cols=[1]),
+            enter_gene_name=TextInputPanel(name="Enter Gene name", val="gene_name", row=3, cols=[2]),
+            enter_proteome=TextInputPanel(name="Enter Proteome", val="proteome", row=3, cols=[3]),
+            enter_pubchem=TextInputPanel(name="Enter PubChem ID", val="pubchem_id", row=4, cols=[1]),
+            enter_smiles=TextInputPanel(name="Enter SMILES", val="smiles", row=4, cols=[2]),
+            enter_sdf=TextInputPanel(name="Enter SDF", val="sdf", row=4, cols=[3]),
             # button
             start_docking=GridButton(name="start_docking", label="Start docking", row=5, cols=[1,2,3]),
             output=self.output,

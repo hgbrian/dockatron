@@ -26,26 +26,31 @@ from rich.screen import Screen
 from rich.status import Status
 from rich.style import Style, StyleType
 from textual import events
+from textual.app import App
+from textual.events import Key
+from textual.keys import Keys
 from textual.message import Message
 from textual.widget import Reactive, Widget
 from textual.widgets import Button, ButtonPressed, ScrollView, Static
-from textual.app import App
-from textual.keys import Keys
 
+import os
 import sys
 import time
 import requests
+import platform
 import subprocess
+
+from typing import List
 
 # -------------------------------------------------------------------------------------------------
 # Globals
 #
-if sys.platform in {"linux", "linux2"}:
-    platform = "linux"
-elif sys.platform == "darwin":
-    platform = "osx"
+if platform.uname().system == "Linux":
+    mac_or_linux = "linux"
+elif platform.uname().system == "Darwin":
+    mac_or_linux = "osx" if platform.mac_ver()[0][:2]<"12" else "osx12"
 else:
-    raise ValueError(f"{sys.platform} not supported")
+    raise ValueError(f"{platform.uname()} not supported")
 
 URLS = {
     ("equibind", "linux"): "https://github.com/HannesStark/EquiBind/archive/refs/heads/main.zip",
@@ -57,6 +62,7 @@ URLS = {
     ("proteome", "human"): "https://ftp.ebi.ac.uk/pub/databases/alphafold/latest/UP000005640_9606_HUMAN_v2.tar",
 }
 
+DATADIR = os.path.join(os.getcwd(), "dockatron")
 
 def gen_dl(url, chunk_size=1_048_576, out_file=None):
     """Generator for downloading files"""
@@ -69,19 +75,19 @@ def gen_dl(url, chunk_size=1_048_576, out_file=None):
             yield
 
 
-def install(software_name):
+def DEPRECATED_install(software_name):
     msg = []
     if software_name == "EquiBind":
-        p = subprocess.run(["echo", "git", "clone", URLS[("equibind", platform)]], capture_output=True)
+        p = subprocess.run(["echo", "git", "clone", URLS[("equibind", mac_or_linux)]], capture_output=True)
         msg.append(p.stdout.decode())
         msg.append("`Done`")
         p = subprocess.run(["echo", "conda", "env", "create", "-f", "environment.yml"], capture_output=True)
         msg.append(p.stdout.decode())
     elif software_name == "smina":
-        p = subprocess.run(["echo", "wget", URLS[("smina", platform)]])
+        p = subprocess.run(["echo", "wget", URLS[("smina", mac_or_linux)]])
         msg.append(p.stdout.decode())
     elif software_name == "gnina":
-        p = subprocess.run(["echo", "wget", URLS[("gnina", platform)]])
+        p = subprocess.run(["echo", "wget", URLS[("gnina", mac_or_linux)]])
         msg.append(p.stdout.decode())
     elif software_name == "yeast_proteome":
         p = subprocess.run(["echo", "wget", URLS[("proteome", "yeast")]], bufsize=1, universal_newlines=True)
@@ -100,11 +106,11 @@ class Placeholder(Widget, can_focus=True):
     style: Reactive[str] = Reactive("")
     height: Reactive = Reactive(None)
 
-    def __init__(self, *, name: str = None, height: int = None, row:int = None, col:int = None) -> None:
+    def __init__(self, *, name: str = None, height: int = None, row:int = None, cols:List = None) -> None:
         super().__init__(name=name)
         self.height = height
         self.row = row
-        self.col = col
+        self.cols = cols
 
     def __rich_repr__(self) -> rich.repr.Result:
         yield "name", self.name
@@ -146,13 +152,14 @@ class Placeholder2(Widget, can_focus=True):
     style: Reactive[str] = Reactive("")
     height: Reactive[int] = Reactive(None)
 
-    def __init__(self, *, name: str = None, height: int = None, row:int = None, col:int = None) -> None:
+    def __init__(self, *, name: str = None, height: int = None, val:str = '', row:int = None, cols:List = None) -> None:
         super().__init__(name=name)
         self.height = height
         self.text = ""
         self.title = name
+        self.val = val
         self.row = row
-        self.col = col
+        self.cols = cols
 
     def __rich_repr__(self) -> rich.repr.Result:
         yield "???????????"
@@ -172,30 +179,25 @@ class Placeholder2(Widget, can_focus=True):
     async def on_blur(self, event: events.Blur) -> None:
          self.has_focus = False
 
-    # async def on_enter(self, event: events.Enter) -> None:
-    #     print(event)
-    #     self.mouse_over = True
-
-    # async def on_leave(self, event: events.Leave) -> None:
-    #     print(event)
-    #     self.mouse_over = False
-
     async def on_key(self, event: events.Key):
         if event.key == Keys.Enter:
             await self.emit(ButtonPressed(self))
         elif event.key == Keys.ControlH:
             self.text = self.text[:-1]
+            self.parent.parent.parent.vals[self.val] = self.text
             self.refresh()
         elif self.has_focus and len(event.key)==1:
             self.text = self.text + event.key
+            self.parent.parent.parent.vals[self.val] = self.text
             self.refresh()
+
 
 @rich.repr.auto(angular=False)
 class GridButton(Button):
-    def __init__(self, label:str, *, name: str = None, row:int = None, col:int = None) -> None:
+    def __init__(self, label:str, *, name: str = None, row:int = None, cols:List = None) -> None:
         super().__init__(label)
         self.row = row
-        self.col = col
+        self.cols = cols
 
     # ButtonPressed does not work
     async def on_focus(self, event: events.Focus) -> None:
@@ -210,6 +212,7 @@ class GridButton(Button):
         self.button_style = "white on dark_blue"
         self.refresh()
 
+    # is this still necessary?
     async def on_key(self, event: events.Key):
         if event.key == Keys.Enter:
             await self.emit(ButtonPressed(self))
@@ -220,8 +223,8 @@ class GridButton(Button):
     #    self.label = "Docking..."
     #    self.button_style = "white on dark_green"
 
-    def start_docking(self):
-        self.post_message_from_child_no_wait(Message(self))
+    #def start_docking(self):
+    #    self.post_message_from_child_no_wait(Message(self))
 
     # def handle_button_pressed(self, message: ButtonPressed) -> None:
     #     print("Button pressed")
@@ -237,6 +240,8 @@ class GridTest(App):
         self.col = 1
         self.output_md = ["# Output"]
 
+        self.vals = {}
+
     async def on_load(self) -> None:
         """Bind keys here."""
         await self.bind(Keys.Up, "move_up", "move up")
@@ -245,7 +250,34 @@ class GridTest(App):
         await self.bind(Keys.Right, "move_right", "move right")
 
     async def _update_output(self):
-        await self.output.update(Markdown('\n'.join(self.output_md), hyperlinks=True))
+        await self.output.update(Markdown('\n\n'.join(self.output_md), hyperlinks=True))
+
+    async def _start_docking(self, message_sender):
+        if not (self.vals.get("proteome") or self.vals.get("uniprot_id") or self.vals.get("gene_name")):
+            self.output_md.append("No proteome or uniprot_id or gene_name supplied.")
+            await self._update_output()
+            return
+        elif self.vals.get("proteome"):
+            self.output_md.append(f'Using proteome {self.vals.get("proteome")}')
+            await self._update_output()
+        elif self.vals.get("uniprot_id"):
+            self.output_md.append(f'Using UniProt ID {self.vals.get("uniprot_id")}')
+            await self._update_output()
+        elif self.vals.get("gene_name"):
+            self.output_md.append(f'Using Gene name ID {self.vals.get("gene_name")}')
+            await self._update_output()
+
+        if not (self.vals.get("sdf") or self.vals.get("smiles") or self.vals.get("pubchem_id")):
+            self.output_md.append("No SDF or SMILES or PubChem ID supplied.")
+            await self._update_output()
+            return
+        else:
+            message_sender.label = "Docking..."
+            message_sender.button_style = "white on dark_green"
+            # test set_timer only
+            self.output_md.append('running EquiBind')
+            self.set_timer(0.1, self._update_output)
+
 
     async def _download_file(self, message_sender, url, name):
         message_sender.label = Status(f"Downloading {name}...")
@@ -255,7 +287,7 @@ class GridTest(App):
         dl_total = next(dl_gener)
 
         # These two lines appears to be necessary to show the progress update???
-        self.output_md.append(f"Downloading {name}\n")
+        self.output_md.append(f"Downloading {name} to {DATADIR}")
         await self._update_output()
 
         dl_task = self.progress_bar.add_task(f"[red]Downloading {name}:", total=dl_total)
@@ -269,21 +301,22 @@ class GridTest(App):
         self.output_md.append(f"Downloaded {name}")
         await self._update_output()
 
+
     async def handle_button_pressed(self, message: ButtonPressed) -> None:
         if message.sender.name == "Start docking":
-            message.sender.label = "Docking..."
-            message.sender.button_style = "white on dark_green"
-            self.output_md.append(install("EquiBind"))
-            self.set_timer(1, self._update_output)
+            await self._start_docking(message.sender)
         elif message.sender.label == "Download EquiBind":
-            await self._download_file(message.sender, URLS[("equibind", platform)], "EquiBind")
+            await self._download_file(message.sender, URLS[("equibind", mac_or_linux)], "EquiBind")
         elif message.sender.name == "Download smina":
-            await self._download_file(message.sender, URLS[("smina", platform)], "smina")
+            await self._download_file(message.sender, URLS[("smina", mac_or_linux)], "smina")
 
+    # ------------------------------------------------------------------
+    # Selecting boxes
+    #
     async def _change_focus(self) -> None:
         for child in self.children:
-            if hasattr(child, "row") and hasattr(child, "col"):
-                if child.row == self.row and child.col == self.col:
+            if hasattr(child, "row") and hasattr(child, "cols"):
+                if child.row == self.row and self.col in child.cols:
                     await self.set_focus(child)
 
     async def action_move_up(self) -> None:
@@ -299,7 +332,7 @@ class GridTest(App):
         await self._change_focus()
 
     async def action_move_right(self) -> None:
-        self.col = min(2, self.row + 1)
+        self.col = min(3, self.col + 1)
         await self._change_focus()
 
     # I think this grabs messages before handle_button_pressed got to them?
@@ -315,6 +348,7 @@ class GridTest(App):
 
         grid.add_column(fraction=1, name="l1")
         grid.add_column(fraction=1, name="l2")
+        grid.add_column(fraction=1, name="l3")
         grid.add_column(fraction=6, name="right")
 
         grid.add_row(fraction=1, name="r1")
@@ -324,13 +358,15 @@ class GridTest(App):
         grid.add_row(fraction=1, name="r5")
 
         grid.add_areas(
-            dl_equibind="l1-start|l2-end,r1",
-            dl_smina="l1-start|l2-end,r2",
-            enter_protein="l1,r3",
-            enter_proteome="l2,r3",
+            dl_equibind="l1-start|l3-end,r1",
+            dl_smina="l1-start|l3-end,r2",
+            enter_uniprot_id="l1,r3",
+            enter_gene_name="l2,r3",
+            enter_proteome="l3,r3",
             enter_pubchem="l1,r4",
             enter_smiles="l2,r4",
-            start_docking="l1-start|l2-end,r5",
+            enter_sdf="l3,r4",
+            start_docking="l1-start|l3-end,r5",
             output="right,r1-start|r4-end",
             progress="right,r5"
         )
@@ -341,20 +377,25 @@ class GridTest(App):
         self.progress_panel = Static(name="Progess", renderable=Align.center(self.progress_bar, vertical="middle"))
 
         grid.place(
-            dl_equibind=GridButton(name="Download EquiBind", label="Download EquiBind", row=1, col=1),
-            dl_smina=GridButton(name="Download smina", label="Download smina", row=2, col=1),
-            enter_protein=Placeholder2(name="Enter Proteome", row=3, col=1),
-            enter_proteome=Placeholder2(name="Enter UniProt ID", row=3, col=2),
-            enter_pubchem=Placeholder2(name="Enter Pubchem ID", row=4, col=1),
-            enter_smiles=Placeholder2(name="Enter SMILES", row=4, col=2),
-            start_docking=GridButton(name="start_docking", label="Start docking", row=5, col=1),
+            # download
+            dl_equibind=GridButton(name="Download EquiBind", label="Download EquiBind", row=1, cols=[1,2,3]),
+            dl_smina=GridButton(name="Download smina", label="Download smina", row=2, cols=[1,2,3]),
+            # text entry
+            enter_uniprot_id=Placeholder2(name="Enter UniProt ID", val="uniprot_id", row=3, cols=[1]),
+            enter_gene_name=Placeholder2(name="Enter Gene name", val="gene_name", row=3, cols=[2]),
+            enter_proteome=Placeholder2(name="Enter Proteome", val="proteome", row=3, cols=[3]),
+            enter_pubchem=Placeholder2(name="Enter PubChem ID", val="pubchem_id", row=4, cols=[1]),
+            enter_smiles=Placeholder2(name="Enter SMILES", val="smiles", row=4, cols=[2]),
+            enter_sdf=Placeholder2(name="Enter SDF", val="sdf", row=4, cols=[3]),
+            # button
+            start_docking=GridButton(name="start_docking", label="Start docking", row=5, cols=[1,2,3]),
             output=self.output,
             progress=self.progress_panel,
         )
 
         # hmm, this has to be at the end of this class to work
         async def init_markdown() -> None:
-            md = Markdown(f"# Output\n", hyperlinks=True)
+            md = Markdown(f"# Dockatron Output\n", hyperlinks=True)
             await self.output.update(md)
 
         await self.call_later(init_markdown)

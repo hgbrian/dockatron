@@ -335,7 +335,7 @@ class GridTest(App):
         # Right hand side panels
         self.output = ScrollView(name="Output", gutter=1)
         self.progress_bar = Progress()
-        self.progress_panel = Static(name="Progess", renderable=Align.center(self.progress_bar, vertical="middle"))
+        self.progress_panel = Static(name="Progress", renderable=Align.center(self.progress_bar, vertical="middle"))
 
         grid.place(
             # download
@@ -349,7 +349,7 @@ class GridTest(App):
             enter_smiles=TextInputPanel(name="SMILES", val="smiles", row=4, cols=[2]),
             enter_sdf=TextInputPanel(name="SDF", val="sdf", row=4, cols=[3]),
             # button
-            start_docking=GridButton(name="start_docking", label="Start docking", row=5, cols=[1,2,3]),
+            start_docking=GridButton(name="Start docking", label="Start docking", row=5, cols=[1,2,3]),
             output=self.output,
             progress=self.progress_panel,
         )

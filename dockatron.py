@@ -63,12 +63,18 @@ URLS = {
 
 DATADIR = os.path.join(os.getcwd(), "dockatron")
 
-def gen_dl(url, chunk_size=1_048_576, out_file=None):
+def gen_dl(url, chunk_size=1_048_576, out_dir=None, out_file=None):
     """Generator for downloading files"""
+    if out_dir is not None:
+        os.makedirs(out_dir, exist_ok=True)
+    else:
+        out_dir = "."
+
     resp = requests.get(url, stream=True)
     total = int(resp.headers.get('content-length', 0))
     yield total // chunk_size
-    with open(out_file or url.split('/')[-1], 'wb') as out:
+
+    with open(out_file or f"{out_dir}/{url.split('/')[-1]}", 'wb') as out:
         for data in resp.iter_content(chunk_size=chunk_size):
             out.write(data)
             yield
@@ -238,10 +244,10 @@ class GridTest(App):
         message_sender.button_style = "white on dark_green"
         self.refresh()
 
-        dl_gener = gen_dl(url)
+        dl_gener = gen_dl(url, out_dir=DATADIR)
         dl_total = next(dl_gener)
 
-        # These two lines appears to be necessary to show the progress update???
+        # These two lines appears to be sometimes necessary to show the progress update???
         self.output_md.append(f"Downloading {name} to {DATADIR}")
         await self._update_output()
 
@@ -253,14 +259,14 @@ class GridTest(App):
             self.refresh()
 
         message_sender.label = f"{name} downloaded"
-        self.output_md.append(f"Downloaded {name}")
+        self.output_md.append(f"Downloaded {name} to {DATADIR}")
         await self._update_output()
 
 
     async def handle_button_pressed(self, message: ButtonPressed) -> None:
         if message.sender.name == "Start docking":
             await self._start_docking(message.sender)
-        elif message.sender.label == "Download EquiBind":
+        elif message.sender.name == "Download EquiBind":
             await self._download_file(message.sender, URLS[("equibind", mac_or_linux)], "EquiBind")
         elif message.sender.name == "Download smina":
             await self._download_file(message.sender, URLS[("smina", mac_or_linux)], "smina")

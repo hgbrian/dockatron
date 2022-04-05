@@ -282,6 +282,7 @@ class GridTest(App):
     async def _download_file(self, message_sender, url, name):
         message_sender.label = Status(f"Downloading {name}...")
         message_sender.button_style = "white on dark_green"
+        self.refresh()
 
         dl_gener = gen_dl(url)
         dl_total = next(dl_gener)

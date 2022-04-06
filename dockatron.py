@@ -260,61 +260,6 @@ class GridButton(Button):
     #     self.button_style = "white on dark_green"
 
 
-@rich.repr.auto(angular=False)
-class StaticPanel(Widget):
-    def __init__(
-        self,
-#        renderable: RenderableType,
-        name: str = None,
-        style: StyleType = "",
-    ) -> None:
-        super().__init__(name)
-        self.name = name
-        self.style = style
-
-    def render(self) -> RenderableType:
-        self.gbs = []
-        self.p_table = Table.grid(padding=(0, 0), expand=True)
-        p_table = self.p_table
-
-        p_table.style = self.style
-        p_table.add_column(justify="left", ratio=0, width=20)
-        p_table.add_column(justify="right", ratio=0, width=1)
-        p_table.add_row("List proteomes", GridButton(label="X"))
-        for proteome in PROTEOMES:
-            _gb = GridButton(label=proteome)
-            #_gb.register()
-            #_gb.post_message_no_wait(events.Mount(sender=self))
-            self.gbs.append(_gb)
-            p_table.add_row(_gb)
-            #raise SystemExit(dir(p_table.rows[-1]))#.start_messages()
-        #raise SystemExit(dir(p_table.rows[0]))
-        #p_table.rows[0].text.apply_meta({"@click": f"click_label('node.id')", "tree_node": "node.id"})
-
-        return Panel(p_table, style=self.style)
-
-    async def on_mouse_move(self, event: events.MouseMove) -> None:
-        pass
-        #for a in dir(event):
-        #    try:
-        #        log("FFF", a, getattr(event, a)())
-        #    except:
-        #        log("AAA", a, getattr(event, a))
-
-        
-    # async def capture_mouse(self) -> None:
-    #     await self.release_mouse()
-
-    # async def on_focus(self, event: events.Focus) -> None:
-    #     log("StaticPanel on_focus")
-        
-    async def on_click(self, event: events.Click) -> None:
-        if event.y == 2:
-            log("CLICKED proteome 1")
-            self.gbs[0].has_focus = True
-        elif event.y == 3:
-            log("CLICKED proteome 2")
-            self.gbs[1].has_focus = True
 
 class GridTest(App):
     def __init__(self, *args, **kwargs):

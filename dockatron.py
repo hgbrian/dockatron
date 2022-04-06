@@ -278,7 +278,6 @@ class GridTest(App):
         await self.bind(Keys.Left, "move_left", "move left")
         await self.bind(Keys.Right, "move_right", "move right")
         await self.bind(Keys.Escape, "hide_proteome_list", "Hide proteome list")
-        await self.bind("1", "show_proteome_list", "Show proteome list")
 
     async def _update_output(self):
         await self.output.update(Markdown('\n\n'.join(self.output_md), hyperlinks=True))

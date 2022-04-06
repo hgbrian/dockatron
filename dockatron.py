@@ -25,7 +25,7 @@ from rich.progress_bar import ProgressBar
 from rich.screen import Screen
 from rich.status import Status
 from rich.style import Style, StyleType
-from textual import events
+from textual import events, log
 from textual.app import App
 from textual.keys import Keys
 from textual.message import Message
@@ -71,6 +71,7 @@ def gen_dl(url, chunk_size=1_048_576, out_dir=None, out_file=None):
         out_dir = "."
 
     resp = requests.get(url, stream=True)
+    log(resp.headers)
     total = int(resp.headers.get('content-length', 0))
     yield total // chunk_size
 
@@ -217,6 +218,7 @@ class GridTest(App):
         await self.bind(Keys.Down, "move_down", "move down")
         await self.bind(Keys.Left, "move_left", "move left")
         await self.bind(Keys.Right, "move_right", "move right")
+        await self.bind("b", "toggle_sidebar", "Toggle sidebar")
 
     async def _update_output(self):
         await self.output.update(Markdown('\n\n'.join(self.output_md), hyperlinks=True))
@@ -256,17 +258,14 @@ class GridTest(App):
         dl_gener = gen_dl(url, out_dir=DATADIR)
         dl_total = next(dl_gener)
 
-        # These two lines appears to be sometimes necessary to show the progress update???
-        self.output_md.append(f"Downloading {name} to {DATADIR}")
-        await self._update_output()
-
         dl_task = self.progress_bar.add_task(f"[red]Downloading {name}:", total=dl_total)
         for _ in iter(dl_gener):
             self.progress_bar.update(dl_task, advance=1)
-            # Both refreshes are necessary!!!
+            # Both refreshes are necessary?
             self.progress_panel.refresh()
             self.refresh()
 
+        log(f"dl_done")
         message_sender.label = f"{name} downloaded"
         self.output_md.append(f"Downloaded {name} to {DATADIR}")
         await self._update_output()
@@ -305,6 +304,12 @@ class GridTest(App):
         self.col = min(3, self.col + 1)
         await self._change_focus()
 
+    def action_toggle_sidebar(self) -> None:
+        if self.bar.layout_offset_x == 0:
+            self.bar.animate("layout_offset_x", -40)
+        else:
+            self.bar.animate("layout_offset_x", 0)
+
     # I think this grabs messages before handle_button_pressed got to them?
     #async def on_message(self, message):
     #    if message.sender.name == "Start docking":
@@ -329,7 +334,7 @@ class GridTest(App):
         grid.add_areas(
             dl_equibind="l1,r1",
             dl_smina="l2,r1",
-            dl_human_proteome="l3,r1",
+            dl_proteome="l3,r1",
             enter_uniprot_id="l1,r2",
             enter_gene_name="l2,r2",
             enter_proteome="l3,r2",
@@ -350,7 +355,7 @@ class GridTest(App):
             # download
             dl_equibind=GridButton(name="Download EquiBind", label="Download EquiBind", row=1, cols=[1]),
             dl_smina=GridButton(name="Download smina", label="Download smina", row=1, cols=[2]),
-            dl_human_proteome=GridButton(name="Download human proteome", label="Download human proteome", row=1, cols=[3]),
+            dl_proteome=GridButton(name="Download proteome", label="Download proteome", row=1, cols=[3]),
             # text entry
             enter_uniprot_id=TextInputPanel(name="UniProt ID", val="uniprot_id", row=2, cols=[1]),
             enter_gene_name=TextInputPanel(name="Gene name", val="gene_name", row=2, cols=[2]),
@@ -364,10 +369,13 @@ class GridTest(App):
             progress=self.progress_panel,
         )
 
-        # hmm, this has to be at the end of this class to work
-        #async def init_markdown() -> None:
-        #    md = Markdown(f"# Dockatron Output\n", hyperlinks=True)
-        #    await self.output.update(md)
+        # sidebar test!
+        self.bar = TextInputPanel(name="proteomes")
+        self.bar.text = "A\nB\nC\n"
+        await self.view.dock(self.bar, edge="left", size=40, z=1)
+        self.bar.layout_offset_x = -40
+
+        # not sure what call_later does
         await self.call_later(self._update_output)
 
 GridTest.run(log="textual.log")

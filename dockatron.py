@@ -151,6 +151,15 @@ class TextInputPanel(Widget, can_focus=True):
             self.parent.parent.parent.vals[self.val] = self.text
             self.refresh()
 
+@rich.repr.auto(angular=False)
+class GridScrollView(ScrollView):
+    def __init__(self, *, name: str = None, val:str = "", row:int = None, cols:List = None) -> None:
+        super().__init__(name=name)
+        self.name = name
+        self.row = row
+        self.cols = cols
+        self.update(Markdown('\n\n'.join("self.output_md"), hyperlinks=True))
+
 
 @rich.repr.auto(angular=False)
 class GridButton(Button):
@@ -285,7 +294,7 @@ class GridTest(App):
         await self._change_focus()
 
     async def action_move_down(self) -> None:
-        self.row = min(5, self.row + 1)
+        self.row = min(4, self.row + 1)
         await self._change_focus()
 
     async def action_move_left(self) -> None:
@@ -316,20 +325,20 @@ class GridTest(App):
         grid.add_row(fraction=1, name="r2")
         grid.add_row(fraction=1, name="r3")
         grid.add_row(fraction=1, name="r4")
-        grid.add_row(fraction=1, name="r5")
 
         grid.add_areas(
-            dl_equibind="l1-start|l3-end,r1",
-            dl_smina="l1-start|l3-end,r2",
-            enter_uniprot_id="l1,r3",
-            enter_gene_name="l2,r3",
-            enter_proteome="l3,r3",
-            enter_pubchem="l1,r4",
-            enter_smiles="l2,r4",
-            enter_sdf="l3,r4",
-            start_docking="l1-start|l3-end,r5",
-            output="right,r1-start|r4-end",
-            progress="right,r5"
+            dl_equibind="l1,r1",
+            dl_smina="l2,r1",
+            dl_human_proteome="l3,r1",
+            enter_uniprot_id="l1,r2",
+            enter_gene_name="l2,r2",
+            enter_proteome="l3,r2",
+            enter_pubchem="l1,r3",
+            enter_smiles="l2,r3",
+            enter_sdf="l3,r3",
+            start_docking="l1-start|l3-end,r4",
+            output="right,r1-start|r3-end",
+            progress="right,r4"
         )
 
         # Right hand side panels
@@ -339,17 +348,18 @@ class GridTest(App):
 
         grid.place(
             # download
-            dl_equibind=GridButton(name="Download EquiBind", label="Download EquiBind", row=1, cols=[1,2,3]),
-            dl_smina=GridButton(name="Download smina", label="Download smina", row=2, cols=[1,2,3]),
+            dl_equibind=GridButton(name="Download EquiBind", label="Download EquiBind", row=1, cols=[1]),
+            dl_smina=GridButton(name="Download smina", label="Download smina", row=1, cols=[2]),
+            dl_human_proteome=GridButton(name="Download human proteome", label="Download human proteome", row=1, cols=[3]),
             # text entry
-            enter_uniprot_id=TextInputPanel(name="UniProt ID", val="uniprot_id", row=3, cols=[1]),
-            enter_gene_name=TextInputPanel(name="Gene name", val="gene_name", row=3, cols=[2]),
-            enter_proteome=TextInputPanel(name="Proteome", val="proteome", row=3, cols=[3]),
-            enter_pubchem=TextInputPanel(name="PubChem ID", val="pubchem_id", row=4, cols=[1]),
-            enter_smiles=TextInputPanel(name="SMILES", val="smiles", row=4, cols=[2]),
-            enter_sdf=TextInputPanel(name="SDF", val="sdf", row=4, cols=[3]),
+            enter_uniprot_id=TextInputPanel(name="UniProt ID", val="uniprot_id", row=2, cols=[1]),
+            enter_gene_name=TextInputPanel(name="Gene name", val="gene_name", row=2, cols=[2]),
+            enter_proteome=TextInputPanel(name="Proteome", val="proteome", row=2, cols=[3]),
+            enter_pubchem=TextInputPanel(name="PubChem ID", val="pubchem_id", row=3, cols=[1]),
+            enter_smiles=TextInputPanel(name="SMILES", val="smiles", row=3, cols=[2]),
+            enter_sdf=TextInputPanel(name="SDF", val="sdf", row=3, cols=[3]),
             # button
-            start_docking=GridButton(name="Start docking", label="Start docking", row=5, cols=[1,2,3]),
+            start_docking=GridButton(name="Start docking", label="Start docking", row=4, cols=[1,2,3]),
             output=self.output,
             progress=self.progress_panel,
         )

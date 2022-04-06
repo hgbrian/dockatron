@@ -25,12 +25,15 @@ from rich.progress_bar import ProgressBar
 from rich.screen import Screen
 from rich.status import Status
 from rich.style import Style, StyleType
+from rich.table import Table
 from textual import events, log
 from textual.app import App
 from textual.keys import Keys
 from textual.message import Message
+from textual.message_pump import MessagePump
+from textual.view import View
 from textual.widget import Reactive, Widget
-from textual.widgets import Button, ButtonPressed, ScrollView, Static
+from textual.widgets import Button, ButtonPressed, ScrollView, Static, TreeControl, TreeClick
 
 import os
 import sys
@@ -62,6 +65,8 @@ URLS = {
 }
 
 DATADIR = os.path.join(os.getcwd(), "dockatron")
+
+PROTEOMES = ["H. sapiens", "S. cerevisiae"]
 
 def gen_dl(url, chunk_size=1_048_576, out_dir=None, out_file=None):
     """Generator for downloading files"""
@@ -152,6 +157,52 @@ class TextInputPanel(Widget, can_focus=True):
             self.parent.parent.parent.vals[self.val] = self.text
             self.refresh()
 
+    async def on_click(self, event: events.Click):
+        await self.emit(ButtonPressed(self))
+
+@rich.repr.auto(angular=False)
+class TextPanel(Widget, can_focus=True):
+
+    has_focus: Reactive[bool] = Reactive(False)
+    mouse_over: Reactive[bool] = Reactive(False)
+    keypress: Reactive[str] = Reactive("")
+    style: Reactive[str] = Reactive("")
+    height: Reactive[int] = Reactive(None)
+
+    def __init__(self, *, name: str = None, height: int = None, val:str = '', row:int = None, cols:List = None) -> None:
+        super().__init__(name=name)
+        self.height = height
+        self.text = ""
+        self.title = name
+        self.val = val
+        self.row = row
+        self.cols = cols
+
+    def __rich_repr__(self) -> rich.repr.Result:
+        yield self.name
+
+    def render(self) -> RenderableType:
+        return Panel(
+            Align.left(self.text),
+            border_style="green" if self.mouse_over else "green",
+            box=box.HEAVY if self.has_focus else box.ROUNDED,
+            title=self.title,
+            style=self.style,
+        )
+
+    async def on_focus(self, event: events.Focus) -> None:
+        self.has_focus = True
+
+    async def on_blur(self, event: events.Blur) -> None:
+         self.has_focus = False
+
+    async def on_key(self, event: events.Key):
+        if event.key == Keys.Enter:
+            await self.emit(ButtonPressed(self))
+
+    async def on_click(self, event: events.Click):
+        await self.emit(ButtonPressed(self))
+
 @rich.repr.auto(angular=False)
 class GridScrollView(ScrollView):
     def __init__(self, *, name: str = None, val:str = "", row:int = None, cols:List = None) -> None:
@@ -184,10 +235,16 @@ class GridButton(Button):
 
     # is this still necessary?
     async def on_key(self, event: events.Key):
+        log(f"Button on_key {self}")
         if event.key == Keys.Enter:
             await self.emit(ButtonPressed(self))
 
-    #async def on_click(self, event: events.Click) -> None:
+    async def on_click(self, event: events.Click) -> None:
+        log(f"XXX Button on_click {self}")
+
+    async def on_mouse_move(self, event: events.MouseMove) -> None:
+        log(f"XXX Button move {self}")
+
     #    #self.has_focus = True
     #    self.start_docking()
     #    self.label = "Docking..."
@@ -202,6 +259,63 @@ class GridButton(Button):
     #     self.label = "Docking..."
     #     self.button_style = "white on dark_green"
 
+
+@rich.repr.auto(angular=False)
+class StaticPanel(Widget):
+    def __init__(
+        self,
+#        renderable: RenderableType,
+        name: str = None,
+        style: StyleType = "",
+    ) -> None:
+        super().__init__(name)
+        self.name = name
+        self.style = style
+
+    def render(self) -> RenderableType:
+        self.gbs = []
+        self.p_table = Table.grid(padding=(0, 0), expand=True)
+        p_table = self.p_table
+
+        p_table.style = self.style
+        p_table.add_column(justify="left", ratio=0, width=20)
+        p_table.add_column(justify="right", ratio=0, width=1)
+        p_table.add_row("List proteomes", GridButton(label="X"))
+        for proteome in PROTEOMES:
+            _gb = GridButton(label=proteome)
+            #_gb.register()
+            #_gb.post_message_no_wait(events.Mount(sender=self))
+            self.gbs.append(_gb)
+            p_table.add_row(_gb)
+            #raise SystemExit(dir(p_table.rows[-1]))#.start_messages()
+        #raise SystemExit(dir(p_table.rows[0]))
+        #p_table.rows[0].text.apply_meta({"@click": f"click_label('node.id')", "tree_node": "node.id"})
+
+        return Panel(p_table, style=self.style)
+
+    async def on_mouse_move(self, event: events.MouseMove) -> None:
+        pass
+        #for a in dir(event):
+        #    try:
+        #        log("FFF", a, getattr(event, a)())
+        #    except:
+        #        log("AAA", a, getattr(event, a))
+
+        
+    # async def capture_mouse(self) -> None:
+    #     await self.release_mouse()
+
+    # async def on_focus(self, event: events.Focus) -> None:
+    #     log("StaticPanel on_focus")
+        
+    async def on_click(self, event: events.Click) -> None:
+        if event.y == 2:
+            log("CLICKED proteome 1")
+            self.gbs[0].has_focus = True
+        elif event.y == 3:
+            log("CLICKED proteome 2")
+            self.gbs[1].has_focus = True
+
 class GridTest(App):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -209,7 +323,7 @@ class GridTest(App):
         self.row = 0
         self.col = 1
         self.output_md = ["# Dockatron Output"]
-
+        self.showing_proteome_list = False
         self.vals = {}
 
     async def on_load(self) -> None:
@@ -218,7 +332,8 @@ class GridTest(App):
         await self.bind(Keys.Down, "move_down", "move down")
         await self.bind(Keys.Left, "move_left", "move left")
         await self.bind(Keys.Right, "move_right", "move right")
-        await self.bind("b", "toggle_sidebar", "Toggle sidebar")
+        await self.bind(Keys.Escape, "hide_proteome_list", "Hide proteome list")
+        await self.bind("1", "show_proteome_list", "Show proteome list")
 
     async def _update_output(self):
         await self.output.update(Markdown('\n\n'.join(self.output_md), hyperlinks=True))
@@ -270,20 +385,50 @@ class GridTest(App):
         self.output_md.append(f"Downloaded {name} to {DATADIR}")
         await self._update_output()
 
-
     async def handle_button_pressed(self, message: ButtonPressed) -> None:
+        log("XXX", message.sender.name)
         if message.sender.name == "Start docking":
             await self._start_docking(message.sender)
         elif message.sender.name == "Download EquiBind":
             await self._download_file(message.sender, URLS[("equibind", mac_or_linux)], "EquiBind")
         elif message.sender.name == "Download smina":
             await self._download_file(message.sender, URLS[("smina", mac_or_linux)], "smina")
+        elif message.sender.name == "Proteome":
+            await self.show_hide_proteome_list()
+
+    async def on_click(self, event: events.Click):
+        log("ZZZ", message.sender.name)
+
+    async def handle_on_click(self, event: events.Click):
+        log("ZZZ2", message.sender.name)
 
     # ------------------------------------------------------------------
-    # Selecting boxes
+    # Actions
     #
+    async def action_hide_proteome_list(self) -> None:
+        if self.showing_proteome_list is True:
+            self.showing_proteome_list = False
+            self.proteome_list.animate("layout_offset_x", -40)
+
+    async def action_show_proteome_list(self) -> None:
+        if self.showing_proteome_list is False:
+            self.showing_proteome_list = True
+            self.proteome_list.animate("layout_offset_x", 0)
+
+    async def show_hide_proteome_list(self) -> None:
+        self.showing_proteome_list = not self.showing_proteome_list
+        if self.showing_proteome_list:
+            self.proteome_list.animate("layout_offset_x", 0)
+        else:
+            self.proteome_list.animate("layout_offset_x", -40)
+
     async def _change_focus(self) -> None:
         for child in self.children:
+            log("child", child)
+            try:
+                log("childchild", child.children)
+            except:
+                pass
             if hasattr(child, "row") and hasattr(child, "cols"):
                 if child.row == self.row and self.col in child.cols:
                     await self.set_focus(child)
@@ -303,12 +448,6 @@ class GridTest(App):
     async def action_move_right(self) -> None:
         self.col = min(3, self.col + 1)
         await self._change_focus()
-
-    def action_toggle_sidebar(self) -> None:
-        if self.bar.layout_offset_x == 0:
-            self.bar.animate("layout_offset_x", -40)
-        else:
-            self.bar.animate("layout_offset_x", 0)
 
     # I think this grabs messages before handle_button_pressed got to them?
     #async def on_message(self, message):
@@ -359,7 +498,7 @@ class GridTest(App):
             # text entry
             enter_uniprot_id=TextInputPanel(name="UniProt ID", val="uniprot_id", row=2, cols=[1]),
             enter_gene_name=TextInputPanel(name="Gene name", val="gene_name", row=2, cols=[2]),
-            enter_proteome=TextInputPanel(name="Proteome", val="proteome", row=2, cols=[3]),
+            enter_proteome=TextPanel(name="Proteome", val="proteome", row=2, cols=[3]),
             enter_pubchem=TextInputPanel(name="PubChem ID", val="pubchem_id", row=3, cols=[1]),
             enter_smiles=TextInputPanel(name="SMILES", val="smiles", row=3, cols=[2]),
             enter_sdf=TextInputPanel(name="SDF", val="sdf", row=3, cols=[3]),
@@ -369,13 +508,28 @@ class GridTest(App):
             progress=self.progress_panel,
         )
 
-        # sidebar test!
-        self.bar = TextInputPanel(name="proteomes")
-        self.bar.text = "A\nB\nC\n"
-        await self.view.dock(self.bar, edge="left", size=40, z=1)
-        self.bar.layout_offset_x = -40
-
         # not sure what call_later does
         await self.call_later(self._update_output)
+
+        # --------------
+        # sidebar test!
+        tree = TreeControl("Press Escape to dismiss\nProteomes", {})
+        for pname in PROTEOMES:
+            await tree.add(tree.root.id, pname, {"pname": pname})
+        await tree.root.expand()
+        self.proteome_list = tree
+        self.proteome_list.layout_offset_x = -40
+        await self.view.dock(self.proteome_list, edge="left", size=40, z=1)
+
+    async def handle_tree_click(self, message: TreeClick[dict]) -> None:
+        """Called in response to a tree click."""
+        log(f"Tree Click {message} {message.node.label}")
+        for child in self.children:
+            if child.name == "Proteome":
+                log("Child", child, child.text)
+                child.text = message.node.label
+                child.refresh()
+        await self.action_hide_proteome_list()
+
 
 GridTest.run(log="textual.log")

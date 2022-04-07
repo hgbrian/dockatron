@@ -26,6 +26,7 @@ from rich.screen import Screen
 from rich.status import Status
 from rich.style import Style, StyleType
 from rich.table import Table
+from rich.text import Text, TextType
 from textual import events, log
 from textual.app import App
 from textual.keys import Keys
@@ -33,7 +34,7 @@ from textual.message import Message
 from textual.message_pump import MessagePump
 from textual.view import View
 from textual.widget import Reactive, Widget
-from textual.widgets import Button, ButtonPressed, ScrollView, Static, TreeControl, TreeClick
+from textual.widgets import Button, ButtonPressed, ScrollView, Static, TreeControl, TreeClick, TreeNode
 
 import os
 import sys
@@ -267,6 +268,7 @@ class GridTest(App):
         self.grid = None
         self.row = 0
         self.col = 1
+        self.row_proteome = 0
         self.output_md = ["# Dockatron Output"]
         self.showing_proteome_list = False
         self.vals = {}
@@ -277,7 +279,7 @@ class GridTest(App):
         await self.bind(Keys.Down, "move_down", "move down")
         await self.bind(Keys.Left, "move_left", "move left")
         await self.bind(Keys.Right, "move_right", "move right")
-        await self.bind(Keys.Escape, "hide_proteome_list", "Hide proteome list")
+        log("BBB", self.bindings.keys)
 
     async def _update_output(self):
         await self.output.update(Markdown('\n\n'.join(self.output_md), hyperlinks=True))
@@ -330,7 +332,7 @@ class GridTest(App):
         await self._update_output()
 
     async def handle_button_pressed(self, message: ButtonPressed) -> None:
-        log("XXX", message.sender.name)
+        log("ZZZ3", message.sender.name)
         if message.sender.name == "Start docking":
             await self._start_docking(message.sender)
         elif message.sender.name == "Download EquiBind":
@@ -340,8 +342,12 @@ class GridTest(App):
         elif message.sender.name == "Proteome":
             await self.show_hide_proteome_list()
 
+        if message.sender.name in self.rowcol_dict:
+            self.row = self.rowcol_dict[message.sender.name][0]
+            self.col = self.rowcol_dict[message.sender.name][1][0]
+
     async def on_click(self, event: events.Click):
-        log("ZZZ", message.sender.name)
+        log("ZZZ1", message.sender.name)
 
     async def handle_on_click(self, event: events.Click):
         log("ZZZ2", message.sender.name)
@@ -353,18 +359,25 @@ class GridTest(App):
         if self.showing_proteome_list is True:
             self.showing_proteome_list = False
             self.proteome_list.animate("layout_offset_x", -40)
+            await self.bind(Keys.Up, "move_up", "move up")
+            await self.bind(Keys.Down, "move_down", "move down")
+            await self.bind(Keys.Left, "move_left", "move left")
+            await self.bind(Keys.Right, "move_right", "move right")
 
     async def action_show_proteome_list(self) -> None:
         if self.showing_proteome_list is False:
             self.showing_proteome_list = True
             self.proteome_list.animate("layout_offset_x", 0)
+            await self.bind(Keys.Up, "move_up_proteome", "move up proteome")
+            await self.bind(Keys.Down, "move_down_proteome", "move down proteome")
+            await self.bind(Keys.Escape, "hide_proteome_list", "hide proteome list")
+            await self.bind(Keys.Enter, "select_proteome", "select proteome")
 
     async def show_hide_proteome_list(self) -> None:
-        self.showing_proteome_list = not self.showing_proteome_list
         if self.showing_proteome_list:
-            self.proteome_list.animate("layout_offset_x", 0)
+            await self.action_hide_proteome_list()
         else:
-            self.proteome_list.animate("layout_offset_x", -40)
+            await self.action_show_proteome_list()
 
     async def _change_focus(self) -> None:
         for child in self.children:
@@ -392,6 +405,36 @@ class GridTest(App):
     async def action_move_right(self) -> None:
         self.col = min(3, self.col + 1)
         await self._change_focus()
+
+    async def action_move_up_proteome(self) -> None:
+        self.row_proteome = max(1, self.row_proteome - 1)
+        self.proteome_list.hover_node = self.proteome_list.nodes[self.row_proteome].id
+        log("SELECT UP", self.proteome_list.hover_node)
+
+    async def action_move_down_proteome(self) -> None:
+        self.row_proteome = min(len(PROTEOMES), self.row_proteome + 1)
+        self.proteome_list.hover_node = self.proteome_list.nodes[self.row_proteome].id
+        log("SELECT DOWN", self.proteome_list.hover_node)
+
+    async def action_select_proteome(self) -> None:
+        log("SELECT PROTEOME", self.proteome_list.hover_node)
+        if self.proteome_list.hover_node:
+            log("SELECT PROTEOME HOVER", self.proteome_list.hover_node)
+            for child in self.children:
+                if child.name == "Proteome":
+                    log("SELECT PROTEOME TEXT")
+                    child.text = self.proteome_list.nodes[self.proteome_list.hover_node].label
+                    child.refresh()
+            await self.action_hide_proteome_list()
+
+    async def handle_tree_click(self, message: TreeClick[dict]) -> None:
+        """Called in response to a tree click."""
+        log(f"Tree Click {message} {message.node.label}")
+        for child in self.children:
+            if child.name == "Proteome":
+                child.text = message.node.label
+                child.refresh()
+        await self.action_hide_proteome_list()
 
     # I think this grabs messages before handle_button_pressed got to them?
     #async def on_message(self, message):
@@ -434,6 +477,19 @@ class GridTest(App):
         self.progress_bar = Progress()
         self.progress_panel = Static(name="Progress", renderable=Align.center(self.progress_bar, vertical="middle"))
 
+        self.rowcol_dict = {
+            "Download EquiBind": [1, [1]],
+            "Download smina": [1, [2]],
+            "Download proteome": [1, [3]],
+            "UniProt ID": [2, [1]],
+            "Gene name": [2, [2]],
+            "Proteome": [2, [3]],
+            "PubChem ID": [3, [1]],
+            "SMILES": [3, [2]],
+            "SDF": [3, [3]],
+            "Start docking": [4, [1,2,3]]
+        }
+
         grid.place(
             # download
             dl_equibind=GridButton(name="Download EquiBind", label="Download EquiBind", row=1, cols=[1]),
@@ -457,23 +513,12 @@ class GridTest(App):
 
         # --------------
         # sidebar test!
-        tree = TreeControl("Press Escape to dismiss\nProteomes", {})
+        self.proteome_list = TreeControl("Press Escape to dismiss\nProteomes", {})
         for pname in PROTEOMES:
-            await tree.add(tree.root.id, pname, {"pname": pname})
-        await tree.root.expand()
-        self.proteome_list = tree
+            await self.proteome_list.add(self.proteome_list.root.id, pname, {"pname": pname})
+        await self.proteome_list.root.expand()
         self.proteome_list.layout_offset_x = -40
         await self.view.dock(self.proteome_list, edge="left", size=40, z=1)
 
-    async def handle_tree_click(self, message: TreeClick[dict]) -> None:
-        """Called in response to a tree click."""
-        log(f"Tree Click {message} {message.node.label}")
-        for child in self.children:
-            if child.name == "Proteome":
-                log("Child", child, child.text)
-                child.text = message.node.label
-                child.refresh()
-        await self.action_hide_proteome_list()
-
-
+        
 GridTest.run(log="textual.log")

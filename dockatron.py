@@ -81,7 +81,7 @@ def gen_dl(url, chunk_size=1_048_576, out_dir=None, out_file=None):
     total = int(resp.headers.get('content-length', 0))
     yield total // chunk_size
 
-    with open(out_file or f"{out_dir}/{url.split('/')[-1]}", 'wb') as out:
+    with open(f"{out_dir}/{out_file}" if out_file else f"{out_dir}/{url.split('/')[-1]}", 'wb') as out:
         for data in resp.iter_content(chunk_size=chunk_size):
             out.write(data)
             yield
@@ -315,7 +315,12 @@ class GridTest(App):
         message_sender.button_style = "white on dark_green"
         self.refresh()
 
-        dl_gener = gen_dl(url, out_dir=DATADIR)
+        if name == "smina":
+            out_file = "smina"
+        else:
+            out_file = None
+
+        dl_gener = gen_dl(url, out_dir=DATADIR, out_file=out_file)
         dl_total = next(dl_gener)
 
         dl_task = self.progress_bar.add_task(f"[red]Downloading {name}:", total=dl_total)
@@ -336,7 +341,7 @@ class GridTest(App):
             await self._start_docking(message.sender)
         elif message.sender.name == "Download EquiBind":
             await self._download_file(message.sender, URLS[("equibind", mac_or_linux)], "EquiBind")
-        elif message.sender.name == "Download smina":
+        elif message.sender.name == "Download smina" and "smina downloaded" not in message.sender.label:
             await self._download_file(message.sender, URLS[("smina", mac_or_linux)], "smina")
         elif message.sender.name == "Proteome":
             await self.action_show_proteome_list()
@@ -496,10 +501,14 @@ class GridTest(App):
             "Start docking": [4, [1,2,3]]
         }
 
+        equibind_label = "EquiBind downloaded" if os.path.exists(f"{DATADIR}/EquiBind") else "Download EquiBind"
+        smina_label = "smina downloaded" if os.path.exists(f"{DATADIR}/smina") else "Download smina"
+        gnina_label = "gnina downloaded" if os.path.exists(f"{DATADIR}/gnina") else "Download gnina"
+
         grid.place(
             # downloads
-            dl_equibind=GridButton(name="Download EquiBind", label="Download EquiBind", row=1, cols=[1]),
-            dl_smina=GridButton(name="Download smina", label="Download smina", row=1, cols=[2]),
+            dl_equibind=GridButton(name="Download EquiBind", label=equibind_label, row=1, cols=[1]),
+            dl_smina=GridButton(name="Download smina", label=smina_label, row=1, cols=[2]),
             dl_proteome=GridButton(name="Download proteome", label="Download proteome", row=1, cols=[3]),
             # text
             enter_uniprot_id=TextInputPanel(name="UniProt ID", val="uniprot_id", row=2, cols=[1]),

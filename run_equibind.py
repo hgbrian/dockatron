@@ -14,19 +14,18 @@ tempdir = gettempdir()
 NUM_WORKERS = 100
 
 # taken from EquiBind's default inference.yml
-# could be replaced with command line args
+# cannot easily be replaced with command line args for some reason (--config is required)
 config_yaml = """run_dirs:
   - flexible_self_docking # the resulting coordinates will be saved here as tensors in a .pt file (but also as .sdf files if you specify an "output_directory" below)
 inference_path: '{input_dir}' # this should be your input file path as described in the main readme
 
-test_names: timesplit_test
 output_directory: '{output_dir}' # the predicted ligands will be saved as .sdf file here
 run_corrections: True
 use_rdkit_coords: False # generates the coordinates of the ligand with rdkit instead of using the provided conformer. If you already have a 3D structure that you want to use as initial conformer, then leave this as False
 save_trajectories: False
-
 num_confs: 1 # usually this should be 1
 """
+
 
 @contextmanager
 def using_directory(path: str):
@@ -59,7 +58,7 @@ def smina_score(pdb_file: str, sdf_file: str, scoring="minimize"):
 
     cmd = ["python", f"{os.environ['HXROOT']}/apps/docking/smina_dock.py",
         pdb_file, sdf_file,
-        *opt, "--out_tsv=/dev/null"]
+        *opt, "--out_tsv=/tmp/smina_out.tsv"]
 
     out = subprocess.run(cmd, capture_output=True).stdout.decode()
     rs = re.search("Affinity:\s+(\S+)", out, re.MULTILINE)
@@ -69,9 +68,9 @@ def smina_score(pdb_file: str, sdf_file: str, scoring="minimize"):
         return None
 
 
-def run_equibind(yeast_or_human: str, sm_id: str, output_dir=None, friendly_id=None):
+def run_equibind(proteome: str, sm_id: str, output_dir=None, friendly_id=None):
     """Run equibind against a proteome"""
-    proteome_dir = os.path.abspath(f"{yeast_or_human}_proteome")
+    proteome_dir = os.path.abspath(f"{proteome}_proteome")
 
     if "." in sm_id:
         sdf = open(sm_id).read()
@@ -84,10 +83,10 @@ def run_equibind(yeast_or_human: str, sm_id: str, output_dir=None, friendly_id=N
 
     today = datetime.now().isoformat()[:10].replace("-","").replace("20220326", "20220325")
     if not output_dir:
-        output_dir = os.path.join(tempdir, f"{today}_{yeast_or_human}_{friendly_id}")
+        output_dir = os.path.join(tempdir, f"{today}_{proteome}_{friendly_id}")
 
     scores = []
-    df_uniprot = pd.read_csv(f"uniprot_{yeast_or_human}.tsv", sep='\t')[["Entry", "Gene names", "Entry name"]]
+    df_uniprot = pd.read_csv(f"uniprot_{proteome}.tsv", sep='\t')[["Entry", "Gene names", "Entry name"]]
 
     with NamedTemporaryFile('w', suffix=".yml") as config_file, \
         TemporaryDirectory() as sdf_dir, \
@@ -114,9 +113,7 @@ def run_equibind(yeast_or_human: str, sm_id: str, output_dir=None, friendly_id=N
                     desc="EquiBind", total=len(os.listdir(input_dir))):
                     pass
 
-                print(f"wrote equibind results to {output_dir}")
-
-            # Run equibind in parallel
+            # Run smina in parallel to get affinity
             pjobs = []
             for pid in [d for d in os.listdir(output_dir) if os.path.isdir(os.path.join(output_dir, d))]:
                 pdb = [f for f in os.listdir(os.path.join(proteome_dir, pid)) if f.endswith(".pdb")]
@@ -128,7 +125,7 @@ def run_equibind(yeast_or_human: str, sm_id: str, output_dir=None, friendly_id=N
                 pjobs_res = dask.compute(*pjobs, num_workers=NUM_WORKERS)
             scores = [list(s) + [pj] for s, pj in zip(scores, pjobs_res)]
 
-    out_df_file = os.path.join(output_dir, f"{today}_{yeast_or_human}_{friendly_id}_smina_affinities.tsv")
+    out_df_file = os.path.join(output_dir, f"{today}_{proteome}_{friendly_id}_smina_affinities.tsv")
     df_scores = (pd.DataFrame(scores, columns=["pid", "sm_id", "friendly_id", "smina_kcal_mol"])
         .merge(df_uniprot.rename(columns={"Entry":"pid"}), on="pid")
         .assign(smina_kcal_mol = lambda df: df.smina_kcal_mol.astype(float))
@@ -142,10 +139,10 @@ def run_equibind(yeast_or_human: str, sm_id: str, output_dir=None, friendly_id=N
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("yeast_or_human", choices=["yeast", "human", "test"])
+    parser.add_argument("proteome", choices=["yeast", "human", "test"])
     parser.add_argument("sm_id")
     parser.add_argument("--output_dir", nargs="?")
     parser.add_argument("--friendly_id", nargs="?")
     args = parser.parse_args()
 
-    run_equibind(args.yeast_or_human, args.sm_id, args.output_dir, args.friendly_id)
+    run_equibind(args.proteome, args.sm_id, args.output_dir, args.friendly_id)

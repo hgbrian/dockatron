@@ -74,6 +74,9 @@ DATADIR = os.path.join(os.getcwd(), "dockatron")
 
 PROTEOMES = ["H. sapiens", "S. cerevisiae"]
 
+TEMP_MAX_SDF_CONFS = 1
+
+
 def gen_dl(url, chunk_size=1_048_576, out_dir=None, out_file=None):
     """Generator for downloading files"""
     if out_dir is not None:
@@ -90,28 +93,21 @@ def gen_dl(url, chunk_size=1_048_576, out_dir=None, out_file=None):
             out.write(data)
             yield
 
+def gen_dock_smina(pdb_id, sm_id, out_tsv, exhaustiveness=1, max_sdf_confs=1):
+    with subprocess.Popen(["python", "smina_dock.py", pdb_id, sm_id,
+        "--exhaustiveness", str(exhaustiveness),
+        "--max_sdf_confs", str(max_sdf_confs),
+        "--out_tsv", out_tsv],
+        bufsize=1, universal_newlines=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE) as p:
 
-def DEPRECATED_install(software_name):
-    msg = []
-    if software_name == "EquiBind":
-        p = subprocess.run(["echo", "git", "clone", URLS[("equibind", mac_or_linux)]], capture_output=True)
-        msg.append(p.stdout.decode())
-        msg.append("`Done`")
-        p = subprocess.run(["echo", "conda", "env", "create", "-f", "environment.yml"], capture_output=True)
-        msg.append(p.stdout.decode())
-    elif software_name == "smina":
-        p = subprocess.run(["echo", "wget", URLS[("smina", mac_or_linux)]])
-        msg.append(p.stdout.decode())
-    elif software_name == "gnina":
-        p = subprocess.run(["echo", "wget", URLS[("gnina", mac_or_linux)]])
-        msg.append(p.stdout.decode())
-    elif software_name == "yeast_proteome":
-        p = subprocess.run(["echo", "wget", URLS[("proteome", "yeast")]], bufsize=1, universal_newlines=True)
-        msg.append(p.stdout.decode())
-        p = subprocess.run(["echo", "tar", "xvf", URLS[("proteome", "yeast")].split('/')[-1]])
-        msg.append(p.stdout.decode())
+        for line in (l for l in iter(p.stdout) if "Refine time" in l):
+            yield
 
-    return '\n'.join(msg)
+
+def run_docking(pdb_id, sm_id, out_tsv, docking="smina"):
+    if docking=="smina":
+        yield from gen_dock_smina(pdb_id, sm_id, out_tsv)
 
 
 @rich.repr.auto(angular=False)
@@ -286,6 +282,7 @@ class GridTest(App):
 
     async def _update_output(self):
         await self.output.update(Markdown('\n\n'.join(self.output_md), hyperlinks=True))
+        self.refresh() # ???
 
     async def _start_docking(self, message_sender):
         if not (self.vals.get("proteome") or self.vals.get("pdb_id") or self.vals.get("gene_name")):
@@ -309,9 +306,29 @@ class GridTest(App):
         else:
             message_sender.label = "Docking..."
             message_sender.button_style = "white on dark_green"
+            self.refresh() # ???
+
             # test set_timer only
             self.output_md.append('## Running docking with params')
-            self.set_timer(0.1, self._update_output)
+            self._update_output()
+
+            self.out_tsv = "/tmp/test.tsv"
+
+            dk_gener = run_docking(self.vals.get("pdb_id"), self.vals.get("pubchem_id"), self.out_tsv)
+            dk_task = self.progress_bar.add_task(f"[red]smina:", total=TEMP_MAX_SDF_CONFS + 1)
+            self.progress_bar.update(dk_task, advance=0)
+            self.progress_panel.refresh()
+            self.refresh()
+            for _ in iter(dk_gener):
+                self.progress_bar.update(dk_task, advance=1)
+                # Both refreshes are necessary?
+                self.progress_panel.refresh()
+                self.refresh()
+
+            message_sender.label = "Start docking"
+            message_sender.button_style = "white on blue"
+            self.output_md.append(f"Output to {self.out_tsv}")
+            await self._update_output()
 
 
     async def _download_file(self, message_sender, url, name):

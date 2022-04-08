@@ -65,6 +65,11 @@ URLS = {
     ("proteome", "human"): "https://ftp.ebi.ac.uk/pub/databases/alphafold/latest/UP000005640_9606_HUMAN_v2.tar",
 }
 
+# some urls don't return a content length
+DEFAULT_CONTENT_LENGTHS = {
+    URLS[("equibind", "linux")]: int(4e8),
+}
+
 DATADIR = os.path.join(os.getcwd(), "dockatron")
 
 PROTEOMES = ["H. sapiens", "S. cerevisiae"]
@@ -78,7 +83,7 @@ def gen_dl(url, chunk_size=1_048_576, out_dir=None, out_file=None):
 
     resp = requests.get(url, stream=True)
     log(resp.headers)
-    total = int(resp.headers.get('content-length', 0))
+    total = int(resp.headers.get('content-length', DEFAULT_CONTENT_LENGTHS.get(url, 1e8)))
     yield total // chunk_size
 
     with open(f"{out_dir}/{out_file}" if out_file else f"{out_dir}/{url.split('/')[-1]}", 'wb') as out:
@@ -389,9 +394,8 @@ class GridTest(App):
 
     async def _change_focus(self) -> None:
         for child in self.children:
-            log("child", child)
             try:
-                log("childchild", child.children)
+                log("grandchildren found", child.children)
             except:
                 pass
             if hasattr(child, "row") and hasattr(child, "cols"):

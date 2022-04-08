@@ -82,7 +82,6 @@ def gen_dl(url, chunk_size=1_048_576, out_dir=None, out_file=None):
         out_dir = "."
 
     resp = requests.get(url, stream=True)
-    log(resp.headers)
     total = int(resp.headers.get('content-length', DEFAULT_CONTENT_LENGTHS.get(url, 1e8)))
     yield total // chunk_size
 
@@ -289,15 +288,15 @@ class GridTest(App):
         await self.output.update(Markdown('\n\n'.join(self.output_md), hyperlinks=True))
 
     async def _start_docking(self, message_sender):
-        if not (self.vals.get("proteome") or self.vals.get("uniprot_id") or self.vals.get("gene_name")):
-            self.output_md.append("No proteome or uniprot_id or gene_name supplied.")
+        if not (self.vals.get("proteome") or self.vals.get("pdb_id") or self.vals.get("gene_name")):
+            self.output_md.append("No proteome or pdb or gene name supplied.")
             await self._update_output()
             return
         elif self.vals.get("proteome"):
             self.output_md.append(f'Using proteome {self.vals.get("proteome")}')
             await self._update_output()
-        elif self.vals.get("uniprot_id"):
-            self.output_md.append(f'Using UniProt ID {self.vals.get("uniprot_id")}')
+        elif self.vals.get("pdb_id"):
+            self.output_md.append(f'Using PDB {self.vals.get("pdb_id")}')
             await self._update_output()
         elif self.vals.get("gene_name"):
             self.output_md.append(f'Using Gene name ID {self.vals.get("gene_name")}')
@@ -476,7 +475,7 @@ class GridTest(App):
             dl_equibind="l1,r1",
             dl_smina="l2,r1",
             dl_proteome="l3,r1",
-            enter_uniprot_id="l1,r2",
+            enter_pdb="l1,r2",
             enter_gene_name="l2,r2",
             enter_proteome="l3,r2",
             enter_pubchem="l1,r3",
@@ -496,7 +495,7 @@ class GridTest(App):
             "Download EquiBind": [1, [1]],
             "Download smina": [1, [2]],
             "Download proteome": [1, [3]],
-            "UniProt ID": [2, [1]],
+            "PDB": [2, [1]],
             "Gene name": [2, [2]],
             "Proteome": [2, [3]],
             "PubChem ID": [3, [1]],
@@ -515,7 +514,7 @@ class GridTest(App):
             dl_smina=GridButton(name="Download smina", label=smina_label, row=1, cols=[2]),
             dl_proteome=GridButton(name="Download proteome", label="Download proteome", row=1, cols=[3]),
             # text
-            enter_uniprot_id=TextInputPanel(name="UniProt ID", val="uniprot_id", row=2, cols=[1]),
+            enter_pdb=TextInputPanel(name="PDB", val="pdb_id", row=2, cols=[1]),
             enter_gene_name=TextInputPanel(name="Gene name", val="gene_name", row=2, cols=[2]),
             enter_proteome=TextPanel(name="Proteome", val="proteome", row=2, cols=[3]),
             enter_pubchem=TextInputPanel(name="PubChem ID", val="pubchem_id", row=3, cols=[1]),

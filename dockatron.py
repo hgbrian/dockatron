@@ -431,8 +431,6 @@ class GridTest(App):
                             child.text = self.proteome_list.nodes[self.proteome_list.hover_node].label
                             child.refresh()
                 await self.action_hide_proteome_list()
-        else:
-            await self.action_show_proteome_list()
 
     async def handle_tree_click(self, message: TreeClick[dict]) -> None:
         """Called in response to a tree click."""

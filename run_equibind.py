@@ -11,6 +11,8 @@ from tempfile import TemporaryDirectory, NamedTemporaryFile, gettempdir
 
 tempdir = gettempdir()
 
+NUM_WORKERS = 100
+
 # taken from EquiBind's default inference.yml
 # could be replaced with command line args
 config_yaml = """run_dirs:
@@ -98,34 +100,32 @@ def run_equibind(yeast_or_human: str, sm_id: str, output_dir=None, friendly_id=N
         config_file.write(config_yaml.format(input_dir=input_dir, output_dir=output_dir))
         config_file.flush()
         
-        print("Linking files")
-        subprocess.run(f"cp -as {os.path.abspath(proteome_dir).rstrip('/')+'/*'} {input_dir}", shell=True)
-        for dr in tqdm(os.listdir(input_dir)):
+        subprocess.run(f"cp -as {os.path.join(os.path.abspath(proteome_dir), '*')} {input_dir}", shell=True)
+        for dr in tqdm(os.listdir(input_dir), desc="Linking files"):
             subprocess.run(["cp", "-as", os.path.abspath(sdf_file.name), os.path.join(input_dir, dr)])
 
-        print("Running EquiBind")
         with using_directory("EquiBind"):
-            with subprocess.Popen(["conda", "run", "-n", "equibind",
+            with subprocess.Popen(["conda", "run", "-n", "equibind", "--no-capture-output",
                 "python", "-u", "inference.py", f"--config={config_file.name}" ],
                 bufsize=1, universal_newlines=True,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE) as p:
 
-                # TODO fix this something went wrong
-                #for line in tqdm((l for l in p.stdout if l.decode().startswith("Processing")), total=len(df_uniprot)):
-                #    pass
-            
+                for line in tqdm((l for l in iter(p.stdout) if l.startswith("Processing")),
+                    desc="EquiBind", total=len(os.listdir(input_dir))):
+                    pass
+
                 print(f"wrote equibind results to {output_dir}")
 
+            # Run equibind in parallel
             pjobs = []
             for pid in [d for d in os.listdir(output_dir) if os.path.isdir(os.path.join(output_dir, d))]:
-
                 pdb = [f for f in os.listdir(os.path.join(proteome_dir, pid)) if f.endswith(".pdb")]
                 scores.append((pid, sm_id, friendly_id))
                 pjobs.append(dask.delayed(smina_score)(os.path.join(proteome_dir, pid, pdb[0]),
                     os.path.join(output_dir, pid, "lig_equibind_corrected.sdf")))
 
-            with TqdmCallback():
-                pjobs_res = dask.compute(*pjobs, num_workers=100)
+            with TqdmCallback(desc="smina"):
+                pjobs_res = dask.compute(*pjobs, num_workers=NUM_WORKERS)
             scores = [list(s) + [pj] for s, pj in zip(scores, pjobs_res)]
 
     out_df_file = os.path.join(output_dir, f"{today}_{yeast_or_human}_{friendly_id}_smina_affinities.tsv")

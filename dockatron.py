@@ -46,6 +46,7 @@ import subprocess
 from tempfile import gettempdir
 from typing import List
 
+
 # -------------------------------------------------------------------------------------------------
 # Globals
 #
@@ -288,7 +289,7 @@ class GridTest(App):
 
     def _get_friendly_id(self):
         def _smiles_to_id(smiles):
-            return "".join(A+smiles.count(A) for A in "CHONPS" if smiles.count(A) else "")
+            return "".join(A+str(smiles.count(A)) if smiles.count(A) else "" for A in "CHONPS")
 
         prot = self.vals.get('pdb_id') or self.vals.get('gene_name') or self.vals.get('proteome')
         sm = self.vals.get('pubchem_id') or self.vals.get('sdf') or _smiles_to_id(self.vals.get('smiles'))
@@ -322,14 +323,17 @@ class GridTest(App):
             message_sender.button_style = "white on dark_green"
             self.refresh() # ???
 
-            # test set_timer only
             self.output_md.append('## Running docking with params')
             await self._update_output()
 
-            self.out_tsv = f"{OUTDIR}/{self._get_friendly_id()}.tsv"
+            prot = self.vals.get('pdb_id') or self.vals.get('gene_name') or self.vals.get('proteome')
+            sm = self.vals.get('pubchem_id') or self.vals.get('sdf') or self.vals.get('smiles')
+            out_tsv = f"{OUTDIR}/{self._get_friendly_id()}.tsv"
 
-            dk_gener = run_docking(self.vals.get("pdb_id"), self.vals.get("pubchem_id"), self.out_tsv)
-            dk_task = self.progress_bar.add_task(f"[red]smina:", total=TEMP_MAX_SDF_CONFS + 1)
+            dk_gener = run_docking(prot, sm, out_tsv)
+
+            # Progress bar for docking -- max_sdf_confs is not known though?
+            dk_task = self.progress_bar.add_task(f"[red]smina:", total=TEMP_MAX_SDF_CONFS)
             self.progress_bar.update(dk_task, advance=0)
             self.progress_panel.refresh()
             self.refresh()
@@ -341,7 +345,7 @@ class GridTest(App):
 
             message_sender.label = "Start docking"
             message_sender.button_style = "white on blue"
-            self.output_md.append(f"Output to {self.out_tsv}")
+            self.output_md.append(f"Output to {out_tsv}")
             await self._update_output()
 
 

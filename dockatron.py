@@ -115,6 +115,10 @@ def gen_dock_smina(pdb_id, sm_id, out_tsv, exhaustiveness=1, max_sdf_confs=1):
         for line in (l for l in iter(p.stdout) if "Refine time" in l):
             yield
 
+        # this would output stderr to output
+        #for line in (l for l in iter(p.stderr)):
+        #    yield line
+
 
 def run_docking(pdb_id, sm_id, out_tsv, docking="smina"):
     if docking=="smina":
@@ -295,6 +299,12 @@ class GridTest(App):
         await self.output.update(Markdown('\n\n'.join(self.output_md), hyperlinks=True))
         self.refresh() # ???
 
+        # another janky timer!
+        def _scroll():
+            self.output.target_y = self.output.max_scroll_y
+            self.output.y = self.output.target_y
+        self.set_timer(0.1, _scroll)
+
     def _get_friendly_id(self):
         def _smiles_to_id(smiles):
             return "".join(A+str(smiles.count(A)) if smiles.count(A) else "" for A in "CHONPS")
@@ -345,11 +355,15 @@ class GridTest(App):
             self.progress_bar.update(dk_task, advance=0)
             self.progress_panel.refresh()
             self.refresh()
-            for _ in iter(dk_gener):
+            for l in iter(dk_gener):
                 self.progress_bar.update(dk_task, advance=1)
                 # Both refreshes are necessary?
                 self.progress_panel.refresh()
                 self.refresh()
+
+                if l is not None:
+                    self.output_md.append(l)
+                    await self._update_output()
 
             message_sender.label = "Start docking"
             message_sender.button_style = "white on blue"

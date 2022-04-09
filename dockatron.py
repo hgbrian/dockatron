@@ -43,6 +43,7 @@ import requests
 import platform
 import subprocess
 
+from tempfile import gettempdir
 from typing import List
 
 # -------------------------------------------------------------------------------------------------
@@ -76,6 +77,7 @@ PROTEOMES = ["H. sapiens", "S. cerevisiae"]
 
 TEMP_MAX_SDF_CONFS = 1
 
+OUTDIR = gettempdir()
 
 def gen_dl(url, chunk_size=1_048_576, out_dir=None, out_file=None):
     """Generator for downloading files"""
@@ -284,6 +286,18 @@ class GridTest(App):
         await self.output.update(Markdown('\n\n'.join(self.output_md), hyperlinks=True))
         self.refresh() # ???
 
+    def _get_friendly_id(self):
+        def _smiles_to_id(smiles):
+            return "".join(A+smiles.count(A) for A in "CHONPS" if smiles.count(A) else "")
+
+        prot = self.vals.get('pdb_id') or self.vals.get('gene_name') or self.vals.get('proteome')
+        sm = self.vals.get('pubchem_id') or self.vals.get('sdf') or _smiles_to_id(self.vals.get('smiles'))
+
+        if prot and sm:
+            return f"{prot}_{sm}"
+        else:
+            return None
+
     async def _start_docking(self, message_sender):
         if not (self.vals.get("proteome") or self.vals.get("pdb_id") or self.vals.get("gene_name")):
             self.output_md.append("No proteome or pdb or gene name supplied.")
@@ -310,9 +324,9 @@ class GridTest(App):
 
             # test set_timer only
             self.output_md.append('## Running docking with params')
-            self._update_output()
+            await self._update_output()
 
-            self.out_tsv = "/tmp/test.tsv"
+            self.out_tsv = f"{OUTDIR}/{self._get_friendly_id()}.tsv"
 
             dk_gener = run_docking(self.vals.get("pdb_id"), self.vals.get("pubchem_id"), self.out_tsv)
             dk_task = self.progress_bar.add_task(f"[red]smina:", total=TEMP_MAX_SDF_CONFS + 1)

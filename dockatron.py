@@ -67,15 +67,23 @@ URLS = {
     ("proteome", "human"): "https://ftp.ebi.ac.uk/pub/databases/alphafold/latest/UP000005640_9606_HUMAN_v2.tar",
 }
 
-# some urls don't return a content length
+PROTEOMES = {
+    "E. coli": "https://ftp.ebi.ac.uk/pub/databases/alphafold/latest/UP000000625_83333_ECOLI_v2.tar",
+    "D. melanogaster": "https://ftp.ebi.ac.uk/pub/databases/alphafold/latest/UP000000803_7227_DROME_v2.tar",
+    "H. sapiens": "https://ftp.ebi.ac.uk/pub/databases/alphafold/latest/UP000005640_9606_HUMAN_v2.tar",
+    "S. cerevisiae": "https://ftp.ebi.ac.uk/pub/databases/alphafold/latest/UP000002311_559292_YEAST_v2.tar",
+    "A. thaliana": "https://ftp.ebi.ac.uk/pub/databases/alphafold/latest/UP000006548_3702_ARATH_v2.tar",
+    "C. elegans": "https://ftp.ebi.ac.uk/pub/databases/alphafold/latest/UP000001940_6239_CAEEL_v2.tar",
+}
+
+# some urls don't return a content length, so put something
 DEFAULT_CONTENT_LENGTHS = {
     URLS[("equibind", "linux")]: int(4e8),
 }
 
-DATADIR = os.path.join(os.getcwd(), "dockatron")
+DATADIR = os.path.join(os.getcwd(), "dockatron_files")
 
-PROTEOMES = ["H. sapiens", "S. cerevisiae"]
-
+# TODO fix this
 TEMP_MAX_SDF_CONFS = 1
 
 OUTDIR = gettempdir()
@@ -458,7 +466,7 @@ class GridTest(App):
         log("SELECT UP", self.proteome_list.hover_node)
 
     async def action_move_down_proteome(self) -> None:
-        self.row_proteome = min(len(PROTEOMES), self.row_proteome + 1)
+        self.row_proteome = min(len(PROTEOMES.keys()), self.row_proteome + 1)
         self.proteome_list.hover_node = self.proteome_list.nodes[self.row_proteome].id
         log("SELECT DOWN", self.proteome_list.hover_node)
 
@@ -568,7 +576,7 @@ class GridTest(App):
         # sidebar test!
         #
         self.proteome_list = TreeControl("Press Escape to dismiss\nProteomes", {})
-        for pname in PROTEOMES:
+        for pname in PROTEOMES.keys():
             await self.proteome_list.add(self.proteome_list.root.id, pname, {"pname": pname})
         await self.proteome_list.root.expand()
         self.proteome_list.layout_offset_x = -40

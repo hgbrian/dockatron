@@ -81,12 +81,121 @@ DEFAULT_CONTENT_LENGTHS = {
     URLS[("equibind", "linux")]: int(4e8),
 }
 
+DEBUG = True
+
 DATADIR = os.path.join(os.getcwd(), "dockatron_files")
+os.makedirs(DATADIR, exist_ok=True)
+OUTDIR = os.path.join(os.getcwd(), "dockatron_files", "results")
+os.makedirs(OUTDIR, exist_ok=True)
 
-# TODO fix this
-TEMP_MAX_SDF_CONFS = 1
+EBHOME = os.path.abspath("./EquiBind")
 
-OUTDIR = gettempdir()
+MAX_SDF_CONFS = 1 if DEBUG else 4
+
+from contextlib import contextmanager
+@contextmanager
+def using_directory(path: str):
+    origin = os.getcwd()
+    try:
+        os.chdir(path)
+        yield
+    finally:
+        os.chdir(origin)
+
+
+def test_equibind(config_dict):
+    """Code taken directly from EquiBind/inference.py __main__"""
+    sys.path.insert(1, EBHOME)
+
+    import io
+    from contextlib import redirect_stdout
+    from EquiBind import inference
+    import yaml
+
+    sys.argv.extend(["--config", "/tmp/tmp.yml"])
+
+    # using_directory(EBHOME),
+    with io.StringIO() as f:
+        args = inference.parse_arguments()
+
+        # replace yaml with my own config_dict object
+        #config_dict = yaml.load(args.config, Loader=yaml.FullLoader)
+        args.config.close()
+
+        arg_dict = args.__dict__
+        for key, value in config_dict.items():
+            if isinstance(value, list):
+                for v in value:
+                    arg_dict[key].append(v)
+            else:
+                arg_dict[key] = value
+        args.config = args.config.name
+
+        with redirect_stdout(f):
+            for run_dir in args.run_dirs:
+                args.checkpoint = f'{EBHOME}/runs/{run_dir}/best_checkpoint.pt'
+                config_dict['checkpoint'] = f'{EBHOME}/runs/{run_dir}/best_checkpoint.pt'
+                # overwrite args with args from checkpoint except for the args that were contained in the config file
+                arg_dict = args.__dict__
+                with open(os.path.join(os.path.dirname(args.checkpoint), 'train_arguments.yaml'), 'r') as arg_file:
+                    checkpoint_dict = yaml.load(arg_file, Loader=yaml.FullLoader)
+                for key, value in checkpoint_dict.items():
+                    if key not in config_dict.keys():
+                        if isinstance(value, list):
+                            for v in value:
+                                arg_dict[key].append(v)
+                        else:
+                            arg_dict[key] = value
+                args.model_parameters['noise_initial'] = 0
+                if args.inference_path == None:
+                    inference.inference(args)
+                else:
+                    inference.inference_from_files(args)
+
+        return
+
+def gen_test_equibind2(inference_path, output_directory):
+    import glob
+    from time import sleep
+    from multiprocessing import TimeoutError, Process
+    config_dict = dict(
+        output_directory=output_directory,
+        run_dirs=['flexible_self_docking'],
+        inference_path=inference_path,
+        run_corrections=True,
+        use_rdkit_coords=False,
+        save_trajectories=False,
+        num_confs = 1
+    )
+
+    yield len(glob.glob(f"{inference_path}/*/*.pdb"))
+    p = Process(target=test_equibind, args=(config_dict,))
+    p.start()
+
+    for n in range(100_000):
+        num_done = len(glob.glob(f"{output_directory}/*/lig_equibind_corrected.sdf"))
+        yield num_done
+        sleep(2)
+        if not p.is_alive():
+            break
+    else:
+        raise Exception("EquiBind failed to finish before timeout")
+
+    return
+
+def test_equibind_generator():
+    eb_iter = gen_test_equibind2(inference_path=f"{EBHOME}/../mycophenolic_acid_test",
+        output_directory=f"{EBHOME}/data/results/output/mycophenolic_acid_yeast")
+
+    from time import sleep
+    total = next(eb_iter)
+    for p in eb_iter:
+        print(p, total)
+    sleep(1)
+    raise SystemExit("finished testing equibind as a module")
+
+
+test_equibind_generator()
 
 def gen_dl(url, chunk_size=1_048_576, out_dir=None, out_file=None):
     """Generator for downloading files"""
@@ -116,14 +225,23 @@ def gen_dock_smina(pdb_id, sm_id, out_tsv, exhaustiveness=1, max_sdf_confs=1):
             yield
 
         # this would output stderr to output
-        #for line in (l for l in iter(p.stderr)):
-        #    yield line
+        for line in (l for l in iter(p.stderr)):
+            yield line
+
+def gen_dock_equibind(pdb_id, sm_id, out_tsv):
+    with subprocess.Popen(["python", "run_equibind.py", "test", "123456"],
+        bufsize=1, universal_newlines=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE) as p:
+
+        for line in (l for l in iter(p.stdout) if "Refine time" in l):
+            yield
 
 
 def run_docking(pdb_id, sm_id, out_tsv, docking="smina"):
     if docking=="smina":
         yield from gen_dock_smina(pdb_id, sm_id, out_tsv)
-
+    elif docking=="equibind":
+        yield from gen_dock_equibind(pdb_id, sm_id, out_tsv)
 
 @rich.repr.auto(angular=False)
 class TextInputPanel(Widget, can_focus=True):
@@ -350,11 +468,15 @@ class GridTest(App):
 
             dk_gener = run_docking(prot, sm, out_tsv)
 
+            # ---------------------------------------------------------------
             # Progress bar for docking -- max_sdf_confs is not known though?
-            dk_task = self.progress_bar.add_task(f"[red]smina:", total=TEMP_MAX_SDF_CONFS)
+            #
+            dk_task = self.progress_bar.add_task(f"[red]smina:", total=MAX_SDF_CONFS + 1)
             self.progress_bar.update(dk_task, advance=0)
             self.progress_panel.refresh()
             self.refresh()
+
+            err = [] # keep track of errors returned on running smina
             for l in iter(dk_gener):
                 self.progress_bar.update(dk_task, advance=1)
                 # Both refreshes are necessary?
@@ -362,13 +484,18 @@ class GridTest(App):
                 self.refresh()
 
                 if l is not None:
-                    self.output_md.append(l)
-                    await self._update_output()
+                    err.append(l)
 
             message_sender.label = "Start docking"
             message_sender.button_style = "white on blue"
-            self.output_md.append(f"Output to {out_tsv}")
-            await self._update_output()
+
+            if os.path.exists(out_tsv):
+                self.output_md.append(f"Output to {out_tsv}")
+                await self._update_output()
+            
+            if len(err) > 0:
+                self.output_md.extend(err)
+                await self._update_output()
 
 
     async def _download_file(self, message_sender, url, name):
@@ -404,8 +531,10 @@ class GridTest(App):
             await self._download_file(message.sender, URLS[("equibind", mac_or_linux)], "EquiBind")
         elif message.sender.name == "Download smina" and "smina downloaded" not in message.sender.label:
             await self._download_file(message.sender, URLS[("smina", mac_or_linux)], "smina")
-        elif message.sender.name == "Proteome":
+        elif message.sender.name == "Download proteome":
             await self.action_show_proteome_list()
+        elif message.sender.name == "Proteome":
+            await self.action_show_downloaded_proteome_list()
 
         if message.sender.name in self.rowcol_dict:
             self.row = self.rowcol_dict[message.sender.name][0]
@@ -432,6 +561,26 @@ class GridTest(App):
         self.set_timer(0.1, _hide_p)
 
     async def action_show_proteome_list(self) -> None:
+        self.proteome_list.animate("layout_offset_x", 0)
+        await self.bind(Keys.Up, "move_up_proteome", "move up proteome")
+        await self.bind(Keys.Down, "move_down_proteome", "move down proteome")
+        await self.bind(Keys.Escape, "hide_proteome_list", "hide proteome list")
+        await self.bind(Keys.Enter, "enter_pressed", "enter pressed")
+
+        # this is nasty but otherwise it closes immediately
+        def _show_p(): self.showing_proteome_list = True
+        self.set_timer(0.1, _show_p)
+
+    async def action_show_downloaded_proteome_list(self) -> None:
+        # TODO
+        # based on action_show_proteome_list
+        # with undownloaded ones removed
+        for n in self.proteome_list.nodes:
+            log("node1", dir(self.proteome_list.nodes[n].parent))
+            log("node2", dir(self.proteome_list.nodes[n]))
+            if n != 3:
+                pass #self.proteome_list.nodes
+
         self.proteome_list.animate("layout_offset_x", 0)
         await self.bind(Keys.Up, "move_up_proteome", "move up proteome")
         await self.bind(Keys.Down, "move_down_proteome", "move down proteome")
@@ -596,5 +745,8 @@ class GridTest(App):
         self.proteome_list.layout_offset_x = -40
         await self.view.dock(self.proteome_list, edge="left", size=40, z=1)
 
+        # TODO make this work
+        #if not os.path.exists(os.path.join(DATADIR, "smina")):
+        #    self._download_smina()
 
 GridTest.run(log="textual.log")

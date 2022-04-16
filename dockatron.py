@@ -1,6 +1,6 @@
 """
 # Dockatron
-Dockatron relies on the following tools.
+Dockatron relies on the following tools:
 
 ## Cite smina
 - http://pubs.acs.org/doi/abs/10.1021/ci300604z
@@ -12,6 +12,21 @@ Dockatron relies on the following tools.
 - Jumper, J et al. Highly accurate protein structure prediction with AlphaFold. Nature (2021).
 - Varadi, M et al. AlphaFold Protein Structure Database: massively expanding the structural coverage of protein-sequence space with high-accuracy models. Nucleic Acids Research (2021).
 """
+import io
+import os
+import platform
+import sys
+
+from contextlib import contextmanager, redirect_stdout
+from glob import glob
+from multiprocessing import Process
+from tempfile import NamedTemporaryFile
+from time import sleep
+from typing import List
+
+import requests
+import yaml
+
 
 import rich
 from rich import box
@@ -36,24 +51,20 @@ from textual.view import View
 from textual.widget import Reactive, Widget
 from textual.widgets import Button, ButtonPressed, ScrollView, Static, TreeControl, TreeClick, TreeNode
 
-import os
-import sys
-import time
-import requests
-import platform
-import subprocess
+from smina_dock import dock
 
-from tempfile import gettempdir
-from typing import List
+# Assume EquiBind is downloaded to a folder under dockatron
+EBHOME = os.path.abspath("./EquiBind")
+sys.path.insert(1, EBHOME)
+from EquiBind import inference
 
-
-# -------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------
 # Globals
 #
 if platform.uname().system == "Linux":
-    mac_or_linux = "linux"
+    MAC_OR_LINUX = "linux"
 elif platform.uname().system == "Darwin":
-    mac_or_linux = "osx" if platform.mac_ver()[0][:2]<"12" else "osx12"
+    MAC_OR_LINUX = "osx" if platform.mac_ver()[0][:2]<"12" else "osx12"
 else:
     raise ValueError(f"{platform.uname()} not supported")
 
@@ -88,13 +99,22 @@ os.makedirs(DATADIR, exist_ok=True)
 OUTDIR = os.path.join(os.getcwd(), "dockatron_files", "results")
 os.makedirs(OUTDIR, exist_ok=True)
 
-EBHOME = os.path.abspath("./EquiBind")
 
-MAX_SDF_CONFS = 1 if DEBUG else 4
+# with DEBUG, all the fast options are selected
+DEFAULT_MAX_SDF_CONFS = 1 if DEBUG else 4
+DEFAULT_EXHAUSTIVENESS = 1 if DEBUG else 8
 
-from contextlib import contextmanager
+# FIXFIX
+DEFAULT_MAX_SDF_CONFS = 10
+DEFAULT_EXHAUSTIVENESS = 1
+
+# --------------------------------------------------------------------------------------------------
+# Calling other libraries
+#
+
 @contextmanager
 def using_directory(path: str):
+    """use a working directory"""
     origin = os.getcwd()
     try:
         os.chdir(path)
@@ -103,19 +123,13 @@ def using_directory(path: str):
         os.chdir(origin)
 
 
-def test_equibind(config_dict):
+def run_equibind(config_dict):
     """Code taken directly from EquiBind/inference.py __main__"""
-    sys.path.insert(1, EBHOME)
-
-    import io
-    from contextlib import redirect_stdout
-    from EquiBind import inference
-    import yaml
-
-    sys.argv.extend(["--config", "/tmp/tmp.yml"])
+    # EquiBind expects a file, no matter what?
+    sys.argv.extend(["--config", "/tmp/EquiBind_placeholder.yml"])
 
     # using_directory(EBHOME),
-    with io.StringIO() as f:
+    with io.StringIO() as f: # redirect stdout here
         args = inference.parse_arguments()
 
         # replace yaml with my own config_dict object
@@ -139,6 +153,7 @@ def test_equibind(config_dict):
                 arg_dict = args.__dict__
                 with open(os.path.join(os.path.dirname(args.checkpoint), 'train_arguments.yaml'), 'r') as arg_file:
                     checkpoint_dict = yaml.load(arg_file, Loader=yaml.FullLoader)
+
                 for key, value in checkpoint_dict.items():
                     if key not in config_dict.keys():
                         if isinstance(value, list):
@@ -147,17 +162,17 @@ def test_equibind(config_dict):
                         else:
                             arg_dict[key] = value
                 args.model_parameters['noise_initial'] = 0
-                if args.inference_path == None:
+                if args.inference_path is None:
                     inference.inference(args)
                 else:
                     inference.inference_from_files(args)
 
         return
 
-def gen_test_equibind2(inference_path, output_directory):
-    import glob
-    from time import sleep
-    from multiprocessing import TimeoutError, Process
+def gen_dock_equibind(inference_path:str, output_directory:str, timeout_s:int=100_000):
+    """Run EquiBind in a Process to get progress"""
+
+    # config_dict comes straight from the default EquiBind yaml
     config_dict = dict(
         output_directory=output_directory,
         run_dirs=['flexible_self_docking'],
@@ -168,80 +183,127 @@ def gen_test_equibind2(inference_path, output_directory):
         num_confs = 1
     )
 
-    yield len(glob.glob(f"{inference_path}/*/*.pdb"))
-    p = Process(target=test_equibind, args=(config_dict,))
+    # yield the total number of proteins first
+    yield len(glob(f"{inference_path}/*/*.pdb"))
+
+    p = Process(target=run_equibind, args=(config_dict,))
     p.start()
 
-    for n in range(100_000):
-        num_done = len(glob.glob(f"{output_directory}/*/lig_equibind_corrected.sdf"))
+    sleep_s = 10
+    for _ in range(timeout_s // sleep_s):
+        num_done = len(glob(f"{output_directory}/*/lig_equibind_corrected.sdf"))
         yield num_done
-        sleep(2)
+        sleep(sleep_s)
         if not p.is_alive():
             break
     else:
-        raise Exception("EquiBind failed to finish before timeout")
+        raise Exception(f"EquiBind failed to finish before {timeout_s}")
 
     return
 
-def test_equibind_generator():
-    eb_iter = gen_test_equibind2(inference_path=f"{EBHOME}/../mycophenolic_acid_test",
-        output_directory=f"{EBHOME}/data/results/output/mycophenolic_acid_yeast")
+def test_equibind_gen():
+    """Run EquiBind in a Process to get progress"""
 
-    from time import sleep
-    total = next(eb_iter)
+    eb_iter = gen_dock_equibind(
+        inference_path=f"{EBHOME}/../mycophenolic_acid_test",
+        output_directory=f"{EBHOME}/data/results/output/mycophenolic_acid_yeast"
+    )
+
+    total_prots = next(eb_iter)
     for p in eb_iter:
-        print(p, total)
-    sleep(1)
+        print(p, total_prots)
+
     raise SystemExit("finished testing equibind as a module")
 
 
-test_equibind_generator()
-
 def gen_dl(url, chunk_size=1_048_576, out_dir=None, out_file=None):
-    """Generator for downloading files"""
+    """Generator for downloading files to show progress."""
     if out_dir is not None:
         os.makedirs(out_dir, exist_ok=True)
     else:
         out_dir = "."
 
     resp = requests.get(url, stream=True)
-    total = int(resp.headers.get('content-length', DEFAULT_CONTENT_LENGTHS.get(url, 1e8)))
-    yield total // chunk_size
+    total_dl = int(resp.headers.get('content-length', DEFAULT_CONTENT_LENGTHS.get(url, 1e8)))
+    yield total_dl // chunk_size
 
-    with open(f"{out_dir}/{out_file}" if out_file else f"{out_dir}/{url.split('/')[-1]}", 'wb') as out:
+    with open(os.path.join(out_dir, out_file) if out_file
+            else os.path.join(out_dir, url.split('/')[-1]), 'wb') as out:
         for data in resp.iter_content(chunk_size=chunk_size):
             out.write(data)
             yield
 
-def gen_dock_smina(pdb_id, sm_id, out_tsv, exhaustiveness=1, max_sdf_confs=1):
-    with subprocess.Popen(["python", "smina_dock.py", pdb_id, sm_id,
-        "--exhaustiveness", str(exhaustiveness),
-        "--max_sdf_confs", str(max_sdf_confs),
-        "--out_tsv", out_tsv],
-        bufsize=1, universal_newlines=True,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE) as p:
+# def gen_dock_smina_subprocess(pdb_id, sm_id, out_tsv, exhaustiveness=1, max_sdf_confs=1):
+#     with subprocess.Popen(["python", os.path.join(os.path.abspath(os.getcwd()), "smina_dock.py"), pdb_id, sm_id,
+#         "--exhaustiveness", str(exhaustiveness),
+#         "--max_sdf_confs", str(max_sdf_confs),
+#         "--out_tsv", out_tsv],
+#         bufsize=1, universal_newlines=True,
+#         stdout=subprocess.PIPE, stderr=subprocess.PIPE) as p:
 
-        for line in (l for l in iter(p.stdout) if "Refine time" in l):
-            yield
+#         for line in (l for l in iter(p.stdout) if "Refine time" in l):
+#             yield
 
-        # this would output stderr to output
-        for line in (l for l in iter(p.stderr)):
-            yield line
+#         # this would output stderr to output
+#         for line in (l for l in iter(p.stderr)):
+#             yield line
 
-def gen_dock_equibind(pdb_id, sm_id, out_tsv):
-    with subprocess.Popen(["python", "run_equibind.py", "test", "123456"],
-        bufsize=1, universal_newlines=True,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE) as p:
+def gen_dock_smina(pdb_id:str, sm_id:str, out_tsv:str, exhaustiveness:int=DEFAULT_EXHAUSTIVENESS,
+        max_sdf_confs:int=DEFAULT_MAX_SDF_CONFS, timeout_s:int=100_000):
+    """Run smina in a Process to get progress"""
+    print("MAX_SDF_CONFS", max_sdf_confs)
 
-        for line in (l for l in iter(p.stdout) if "Refine time" in l):
-            yield
+    progress_log = NamedTemporaryFile(suffix=".log", delete=False)
+    print(progress_log.name)
+    sleep_s = 10
+
+    total_sdfs = max_sdf_confs + 1
+
+    with redirect_stdout(io.StringIO()) as f:
+        p = Process(target=dock, kwargs=(dict(pdb_id=pdb_id, sm_id=sm_id,
+            exhaustiveness=exhaustiveness, max_sdf_confs=max_sdf_confs,
+            out_tsv=out_tsv, progress_log=progress_log.name)))
+        p.start()
+
+    for _ in range(timeout_s // sleep_s):
+        if os.path.exists(progress_log.name):
+            with open(progress_log.name, 'r') as _f:
+                print(_f)
+                f_read = _f.read()
+                print(len(f_read))
+                count_iters = f_read.count("Refine")
+                yield (count_iters, total_sdfs)
+        sleep(sleep_s)
+        if not p.is_alive():
+            break
+    else:
+        raise Exception(f"smina failed to finish before {timeout_s}")
+
+    return
+
+# def gen_dock_equibind_subprocess(pdb_id, sm_id, out_tsv):
+#     with subprocess.Popen(["python", "run_equibind.py", "test", "123456"],
+#         bufsize=1, universal_newlines=True,
+#         stdout=subprocess.PIPE, stderr=subprocess.PIPE) as p:
+#         for line in (l for l in iter(p.stdout) if "Refine time" in l):
+#             yield
 
 
 def run_docking(pdb_id, sm_id, out_tsv, docking="smina"):
+    """run docking with smina or equibind"""
     if docking=="smina":
         yield from gen_dock_smina(pdb_id, sm_id, out_tsv)
     elif docking=="equibind":
         yield from gen_dock_equibind(pdb_id, sm_id, out_tsv)
+
+gen_dock = run_docking("6GRA", 123456, "/tmp/6GRA_123456_temp.tsv")
+for it in gen_dock:
+    print("it", it)
+1/0
+
+# --------------------------------------------------------------------------------------------------
+# Textual stuff
+#
 
 @rich.repr.auto(angular=False)
 class TextInputPanel(Widget, can_focus=True):
@@ -528,9 +590,9 @@ class GridTest(App):
         if message.sender.name == "Start docking":
             await self._start_docking(message.sender)
         elif message.sender.name == "Download EquiBind":
-            await self._download_file(message.sender, URLS[("equibind", mac_or_linux)], "EquiBind")
+            await self._download_file(message.sender, URLS[("equibind", MAC_OR_LINUX)], "EquiBind")
         elif message.sender.name == "Download smina" and "smina downloaded" not in message.sender.label:
-            await self._download_file(message.sender, URLS[("smina", mac_or_linux)], "smina")
+            await self._download_file(message.sender, URLS[("smina", MAC_OR_LINUX)], "smina")
         elif message.sender.name == "Download proteome":
             await self.action_show_proteome_list()
         elif message.sender.name == "Proteome":

@@ -1,21 +1,25 @@
-import os, sys, re
-import dask
+"""Run EquiBind as a subprocess.
+"""
+import os
 import subprocess
-import requests
-import pandas as pd
-from tqdm.auto import tqdm
-from tqdm.dask import TqdmCallback
+
 from contextlib import contextmanager
 from datetime import datetime
 from tempfile import TemporaryDirectory, NamedTemporaryFile, gettempdir
 
-tempdir = gettempdir()
+from tqdm.auto import tqdm
+from tqdm.dask import TqdmCallback
 
+import pandas as pd
+import dask
+import smina_dock
+
+tempdir = gettempdir()
 NUM_WORKERS = 100
 
 # taken from EquiBind's default inference.yml
 # cannot easily be replaced with command line args for some reason (--config is required)
-config_yaml = """run_dirs:
+EB_CONFIG_YAML = """run_dirs:
   - flexible_self_docking # the resulting coordinates will be saved here as tensors in a .pt file (but also as .sdf files if you specify an "output_directory" below)
 inference_path: '{input_dir}' # this should be your input file path as described in the main readme
 
@@ -36,52 +40,35 @@ def using_directory(path: str):
     finally:
         os.chdir(origin)
 
-def download_sdf(sm_id: str):
-    """download sdf_2d and sdf_3d from pubchem with pubchem id"""
-    sm_pubchem_url_sdf = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/CID/{sm_id}/record/SDF/"
-
-    sdf_2d = requests.get(f"{sm_pubchem_url_sdf}?record_type=2d")
-    sdf_3d = requests.get(f"{sm_pubchem_url_sdf}?record_type=3d")
-    sdf_2d = sdf_2d.text if sdf_2d.status_code == 200 else None
-    sdf_3d = sdf_3d.text if sdf_3d.status_code == 200 else None
-
-    return sdf_2d, sdf_3d
-
-def smina_score(pdb_file: str, sdf_file: str, scoring="minimize"):
+def smina_score(pdb_file: str, sdf_file: str, out_tsv:str = None, score_type="minimize"):
     """Use smina to score a docked position"""
-    if scoring == "minimize":
-        opt = ["--local_only", "--minimize"]
-    elif scoring == "score_only":
-        opt = ["--score_only"]
+    if score_type == "minimize":
+        smina_args = ["--local_only", "--minimize"]
+    elif score_type == "score_only":
+        smina_args = ["--score_only"]
     else:
-        raise ValueError
+        raise ValueError(f"score_type is {score_type}")
 
-    cmd = ["python", f"{os.environ['HXROOT']}/apps/docking/smina_dock.py",
-        pdb_file, sdf_file,
-        *opt, "--out_tsv=/tmp/smina_out.tsv"]
+    df_sm = smina_dock.dock(pdb_file, sdf_file, max_sdf_confs=4,
+        smina_args=smina_args, out_tsv=out_tsv)
 
-    out = subprocess.run(cmd, capture_output=True).stdout.decode()
-    rs = re.search("Affinity:\s+(\S+)", out, re.MULTILINE)
-    if rs:
-        return rs.group(1)
-    else:
-        return None
+    return df_sm
 
 
-def run_equibind(proteome: str, sm_id: str, output_dir=None, friendly_id=None):
+def run_equibind(proteome: str, sm_id: str, output_dir=None, out_smina_tsv=None, friendly_id=None):
     """Run equibind against a proteome"""
     proteome_dir = os.path.abspath(f"{proteome}_proteome")
 
     if "." in sm_id:
         sdf = open(sm_id).read()
     else:
-        sdf_2d, sdf_3d = download_sdf(sm_id)
+        sdf_2d, sdf_3d = smina_dock.download_sdf(sm_id)
         sdf = sdf_3d if sdf_3d else sdf_2d
 
     if not friendly_id:
         friendly_id = sm_id.split("/")[-1].split('.')[0]
 
-    today = datetime.now().isoformat()[:10].replace("-","").replace("20220326", "20220325")
+    today = datetime.now().isoformat()[:10].replace("-","")
     if not output_dir:
         output_dir = os.path.join(tempdir, f"{today}_{proteome}_{friendly_id}")
 
@@ -96,12 +83,15 @@ def run_equibind(proteome: str, sm_id: str, output_dir=None, friendly_id=None):
         sdf_file.write(sdf)
         sdf_file.flush()
 
-        config_file.write(config_yaml.format(input_dir=input_dir, output_dir=output_dir))
+        config_file.write(EB_CONFIG_YAML.format(input_dir=input_dir, output_dir=output_dir))
         config_file.flush()
-        
-        subprocess.run(f"cp -as {os.path.join(os.path.abspath(proteome_dir), '*')} {input_dir}", shell=True)
+
+        # ------------------------------------------------------------------------------------------
+        # Linking files
+        #
+        subprocess.run(f"cp -as {os.path.join(os.path.abspath(proteome_dir), '*')} {input_dir}", shell=True, check=True)
         for dr in tqdm(os.listdir(input_dir), desc="Linking files"):
-            subprocess.run(["cp", "-as", os.path.abspath(sdf_file.name), os.path.join(input_dir, dr)])
+            subprocess.run(["cp", "-as", os.path.abspath(sdf_file.name), os.path.join(input_dir, dr)], check=True)
 
         with using_directory("EquiBind"):
             with subprocess.Popen(["conda", "run", "-n", "equibind", "--no-capture-output",
@@ -118,15 +108,25 @@ def run_equibind(proteome: str, sm_id: str, output_dir=None, friendly_id=None):
             for pid in [d for d in os.listdir(output_dir) if os.path.isdir(os.path.join(output_dir, d))]:
                 pdb = [f for f in os.listdir(os.path.join(proteome_dir, pid)) if f.endswith(".pdb")]
                 scores.append((pid, sm_id, friendly_id))
-                pjobs.append(dask.delayed(smina_score)(os.path.join(proteome_dir, pid, pdb[0]),
-                    os.path.join(output_dir, pid, "lig_equibind_corrected.sdf")))
+                pjobs.append(dask.delayed(smina_score)(
+                    pdb_file=os.path.join(proteome_dir, pid, pdb[0]),
+                    sdf_file=os.path.join(output_dir, pid, "lig_equibind_corrected.sdf"),
+                    out_tsv=out_smina_tsv,
+                    score_type="minimize"
+                    )
+                )
 
             with TqdmCallback(desc="smina"):
-                pjobs_res = dask.compute(*pjobs, num_workers=NUM_WORKERS)
-            scores = [list(s) + [pj] for s, pj in zip(scores, pjobs_res)]
+                df_res = pd.concat(dask.compute(*pjobs, num_workers=NUM_WORKERS))
 
-    out_df_file = os.path.join(output_dir, f"{today}_{proteome}_{friendly_id}_smina_affinities.tsv")
-    df_scores = (pd.DataFrame(scores, columns=["pid", "sm_id", "friendly_id", "smina_kcal_mol"])
+            print(df_res)
+            #scores = [list(s) + [pj] for s, pj in zip(scores, pjobs_res)]
+
+    out_df_file = os.path.join(output_dir, f"{today}_{proteome}_{friendly_id}_equibind_smina.tsv")
+    df_scores = (df_res #(pd.DataFrame(scores, columns=["pid", "sm_id", "friendly_id", "smina_kcal_mol"])
+        .assign(pdb_id = lambda df: df.pdb_id.apply(lambda o: o.split('/')[-1]))
+        .assign(sm_id = lambda df: df.sm_id.apply(lambda o: o.split('/')[-1]))
+        .assign(dock_bin = lambda df: "EquiBind + smina")
         .merge(df_uniprot.rename(columns={"Entry":"pid"}), on="pid")
         .assign(smina_kcal_mol = lambda df: df.smina_kcal_mol.astype(float))
         .sort_values("smina_kcal_mol")
@@ -141,6 +141,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("proteome", choices=["yeast", "human", "test"])
     parser.add_argument("sm_id")
+    parser.add_argument("--out_tsv", nargs="?")
     parser.add_argument("--output_dir", nargs="?")
     parser.add_argument("--friendly_id", nargs="?")
     args = parser.parse_args()

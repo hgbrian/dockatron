@@ -63,7 +63,7 @@ def link_proteome_files(from_proteome_dir:str, to_inference_path:str, sdf_file:s
     # absolute path everything because of "cp -as" peculiarities
     from_proteome_dir = Path(from_proteome_dir).resolve()
     to_inference_path = Path(to_inference_path).resolve()
-    from_sdf_path = Path(sdf_file.name).resolve()
+    from_sdf_path = Path(sdf_file).resolve()
 
     if from_sdf_path.name.endswith("_ligand.sdf"):
         to_sdf_filename = from_sdf_path.name
@@ -119,7 +119,7 @@ def run_equibind(proteome_dir: str, sm_id: str, output_dir=None, out_smina_tsv=N
         # ------------------------------------------------------------------------------------------
         # Linking files
         #
-        link_proteome_files(proteome_dir, input_dir, sdf_file)
+        link_proteome_files(proteome_dir, input_dir, sdf_file.name)
 
         with using_directory("EquiBind"):
             with subprocess.Popen(["conda", "run", "-n", "equibind", "--no-capture-output",

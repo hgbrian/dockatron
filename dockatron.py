@@ -20,7 +20,7 @@ import sys
 from contextlib import contextmanager, redirect_stdout
 from multiprocessing import Process
 from pathlib import Path
-from tempfile import NamedTemporaryFile, gettempdir
+from tempfile import NamedTemporaryFile, mkdtemp, gettempdir
 from time import sleep
 from typing import List
 
@@ -50,11 +50,12 @@ from textual.view import View
 from textual.widget import Reactive, Widget
 from textual.widgets import Button, ButtonPressed, ScrollView, Static, TreeControl, TreeClick, TreeNode
 
-from smina_dock import dock
+import smina_dock
+import run_equibind
 
 # Assume EquiBind is downloaded to a folder under dockatron
 EBHOME = Path("./EquiBind").resolve()
-sys.path.insert(1, EBHOME)
+sys.path.insert(1, EBHOME.as_posix())
 from EquiBind import inference
 
 # --------------------------------------------------------------------------------------------------
@@ -138,15 +139,15 @@ def using_directory(path: str):
         os.chdir(origin)
 
 
-def run_equibind(config_dict):
+def dock_equibind(config_dict):
     """Code taken directly from EquiBind/inference.py __main__"""
     # EquiBind expects a file, no matter what?
     placeholder_yml = Path(TMPDIR, "EquiBind_placeholder.yml")
     if not placeholder_yml.exists():
         placeholder_yml.touch()
-    sys.argv.extend(["--config", placeholder_yml])
+    sys.argv.extend(["--config", placeholder_yml.as_posix()])
 
-    # using_directory(EBHOME) ??????
+    # using_directory(EBHOME) maybe ??????
     with io.StringIO() as f: # redirecting stdout to f
         args = inference.parse_arguments()
 
@@ -187,6 +188,7 @@ def run_equibind(config_dict):
 
         return
 
+
 def gen_dock_equibind(inference_path:str, output_directory:str, timeout_s:int=100_000):
     """Run EquiBind in a Process to get progress"""
 
@@ -200,11 +202,10 @@ def gen_dock_equibind(inference_path:str, output_directory:str, timeout_s:int=10
         save_trajectories=False,
         num_confs = 1
     )
-    print(config_dict)
-    # yield the total number of proteins first
+
     total_pdbs = len(list(Path(inference_path).glob("*/*.pdb")))
 
-    p = Process(target=run_equibind, args=(config_dict,))
+    p = Process(target=dock_equibind, args=(config_dict,))
     p.start()
 
     sleep_s = 10
@@ -262,7 +263,7 @@ def gen_dock_smina(pdb_id:str, sm_id:str, out_tsv:str, exhaustiveness:int=DEFAUL
     total_sdfs = max_sdf_confs + 1
 
     with redirect_stdout(io.StringIO()) as f:
-        p = Process(target=dock, kwargs=(dict(pdb_id=pdb_id, sm_id=sm_id,
+        p = Process(target=smina_dock.dock, kwargs=(dict(pdb_id=pdb_id, sm_id=sm_id,
             exhaustiveness=exhaustiveness, max_sdf_confs=max_sdf_confs,
             out_tsv=out_tsv, progress_log=progress_log.name)))
         p.start()
@@ -290,17 +291,40 @@ def gen_dock_smina(pdb_id:str, sm_id:str, out_tsv:str, exhaustiveness:int=DEFAUL
 #         for line in (l for l in iter(p.stdout) if "Refine time" in l):
 #             yield
 
+def prep_equibind_dir(pdb_or_proteome_id:str, sm_id:str):
+    """Place PDB and SDF files in a directory for EquiBind to process"""
+
+    inference_path = mkdtemp(prefix="equibind_")
+    sdf_3d, sdf_from_smiles = smina_dock.sm_id_to_sdfs(sm_id)
+    sdf = sdf_3d if sdf_3d is not None else sdf_from_smiles
+
+    with NamedTemporaryFile('w', suffix=".sdf", delete=False    ) as sdf_file:
+        sdf_file.write(sdf)
+        sdf_file.flush()
+        # either link from a pdb or a proteome
+        proteome_dir = pdb_or_proteome_id
+        print(proteome_dir, inference_path, sdf_file.name)
+        run_equibind.link_proteome_files(proteome_dir, inference_path, sdf_file.name)
+        print("Done linking!")
+
+    return inference_path
 
 def run_docking(pdb_id, sm_id, out_tsv, docking="smina"):
     """run docking with smina or equibind"""
     if docking=="smina":
         yield from gen_dock_smina(pdb_id, sm_id, out_tsv=out_tsv)
     elif docking=="equibind":
-        yield from gen_dock_equibind(inference_path=pdb_id, output_directory=sm_id)
+        inference_path = prep_equibind_dir("test_proteome", 123456)
+        from datetime import datetime
+        today = datetime.now().isoformat()[:10].replace("-","")
+        output_directory = Path(gettempdir(), f"{today}_test_proteome_123456")
+
+        yield from gen_dock_equibind(inference_path, output_directory.as_posix())
 
 gen_dock = run_docking("6GRA", 123456, "/tmp/6GRA_123456_temp.tsv", docking="equibind")
 for it in gen_dock:
     print("it", it)
+print(it)
 1/0
 
 # --------------------------------------------------------------------------------------------------

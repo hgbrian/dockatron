@@ -5,6 +5,7 @@ import subprocess
 
 from contextlib import contextmanager
 from datetime import datetime
+from pathlib import Path
 from tempfile import TemporaryDirectory, NamedTemporaryFile, gettempdir
 
 from tqdm.auto import tqdm
@@ -54,10 +55,34 @@ def smina_score(pdb_file: str, sdf_file: str, out_tsv:str = None, score_type="mi
 
     return df_sm
 
+def link_proteome_files(from_proteome_dir:str, to_inference_path:str, sdf_file:str):
+    """Copy (soft link) files to the directory structure EquiBind requires:
+    {inference_path}/{protein_names}/{pdb_id}_protein.pdb,{sdf_id}_ligand.sdf
+    """
+    # resolve everything because of "cp -as" peculiarities
+    from_proteome_dir = Path(from_proteome_dir).resolve()
+    to_inference_path = Path(to_inference_path).resolve()
+
+    from_sdf_path = Path(sdf_file.name).resolve()
+    if from_sdf_path.name.endswith("_ligand.sdf"):
+        to_sdf_filename = from_sdf_path.name
+    else:
+        to_sdf_filename = from_sdf_path.stem + "_ligand.sdf"
+
+    # copy pdb files (many to many)
+    from_pdb_dirs = Path(from_proteome_dir).glob("*")
+    for from_pdb_dir in tqdm(from_pdb_dirs, desc="Copying PDB files"):
+        subprocess.run(["cp", "-as", from_pdb_dir, to_inference_path], check=True)
+
+    # copy sdf (ligand) file (one to many)
+    to_sdf_dirs = Path(to_inference_path).glob("*")
+    for dr in tqdm(to_sdf_dirs, desc="Copying SDF files"):
+        subprocess.run(["cp", "-as", from_sdf_path, Path(to_inference_path, dr, to_sdf_filename)], check=True)
+
 
 def run_equibind(proteome: str, sm_id: str, output_dir=None, out_smina_tsv=None, friendly_id=None):
     """Run equibind against a proteome"""
-    proteome_dir = os.path.abspath(f"{proteome}_proteome")
+    proteome_dir = Path(f"{proteome}_proteome").resolve()
 
     if "." in sm_id:
         sdf = open(sm_id).read()
@@ -70,7 +95,7 @@ def run_equibind(proteome: str, sm_id: str, output_dir=None, out_smina_tsv=None,
 
     today = datetime.now().isoformat()[:10].replace("-","")
     if not output_dir:
-        output_dir = os.path.join(tempdir, f"{today}_{proteome}_{friendly_id}")
+        output_dir = Path(tempdir, f"{today}_{proteome}_{friendly_id}")
 
     scores = []
     df_uniprot = pd.read_csv(f"uniprot_{proteome}.tsv", sep='\t')[["Entry", "Gene names", "Entry name"]]
@@ -79,7 +104,7 @@ def run_equibind(proteome: str, sm_id: str, output_dir=None, out_smina_tsv=None,
         TemporaryDirectory() as sdf_dir, \
         TemporaryDirectory() as input_dir:
 
-        sdf_file = open(os.path.join(sdf_dir, f"{friendly_id}_ligand.sdf"), 'w')
+        sdf_file = open(Path(sdf_dir, f"{friendly_id}_ligand.sdf"), 'w')
         sdf_file.write(sdf)
         sdf_file.flush()
 
@@ -89,9 +114,7 @@ def run_equibind(proteome: str, sm_id: str, output_dir=None, out_smina_tsv=None,
         # ------------------------------------------------------------------------------------------
         # Linking files
         #
-        subprocess.run(f"cp -as {os.path.join(os.path.abspath(proteome_dir), '*')} {input_dir}", shell=True, check=True)
-        for dr in tqdm(os.listdir(input_dir), desc="Linking files"):
-            subprocess.run(["cp", "-as", os.path.abspath(sdf_file.name), os.path.join(input_dir, dr)], check=True)
+        link_proteome_files(proteome_dir, input_dir, sdf_file)
 
         with using_directory("EquiBind"):
             with subprocess.Popen(["conda", "run", "-n", "equibind", "--no-capture-output",
@@ -105,14 +128,18 @@ def run_equibind(proteome: str, sm_id: str, output_dir=None, out_smina_tsv=None,
 
             # Run smina in parallel to get affinity
             pjobs = []
-            for pid in [d for d in os.listdir(output_dir) if os.path.isdir(os.path.join(output_dir, d))]:
-                pdb = [f for f in os.listdir(os.path.join(proteome_dir, pid)) if f.endswith(".pdb")]
+            for pid in [d.name for d in Path(output_dir).iterdir() if Path(output_dir, d).is_dir()]:
+                pdb_file = list(Path(proteome_dir, pid).glob("*.pdb"))
+                assert len(pdb_file) == 1, f"proteome directory error: {proteome_dir}/{pid}"
+                pdb_file = pdb_file[0]
+
                 scores.append((pid, sm_id, friendly_id))
+
                 pjobs.append(dask.delayed(smina_score)(
-                    pdb_file=os.path.join(proteome_dir, pid, pdb[0]),
-                    sdf_file=os.path.join(output_dir, pid, "lig_equibind_corrected.sdf"),
-                    out_tsv=out_smina_tsv,
-                    score_type="minimize"
+                    pdb_file = pdb_file.as_posix(), #Path(proteome_dir, pid, pdb[0]),
+                    sdf_file = Path(output_dir, pid, "lig_equibind_corrected.sdf").as_posix(),
+                    out_tsv = out_smina_tsv,
+                    score_type = "minimize"
                     )
                 )
 
@@ -122,14 +149,16 @@ def run_equibind(proteome: str, sm_id: str, output_dir=None, out_smina_tsv=None,
             print(df_res)
             #scores = [list(s) + [pj] for s, pj in zip(scores, pjobs_res)]
 
-    out_df_file = os.path.join(output_dir, f"{today}_{proteome}_{friendly_id}_equibind_smina.tsv")
+    out_df_file = Path(output_dir, f"{today}_{proteome}_{friendly_id}_equibind_smina.tsv")
     df_scores = (df_res #(pd.DataFrame(scores, columns=["pid", "sm_id", "friendly_id", "smina_kcal_mol"])
         .assign(pdb_id = lambda df: df.pdb_id.apply(lambda o: o.split('/')[-1]))
         .assign(sm_id = lambda df: df.sm_id.apply(lambda o: o.split('/')[-1]))
         .assign(dock_bin = lambda df: "EquiBind + smina")
-        .merge(df_uniprot.rename(columns={"Entry":"pid"}), on="pid")
-        .assign(smina_kcal_mol = lambda df: df.smina_kcal_mol.astype(float))
-        .sort_values("smina_kcal_mol")
+        .sort_values("minimizedAffinity")
+        # how to get this back?
+        #.merge(df_uniprot.rename(columns={"Entry":"pid"}), on="pid")
+        #.assign(smina_kcal_mol = lambda df: df.smina_kcal_mol.astype(float))
+        #.sort_values("smina_kcal_mol")
         .to_csv(out_df_file, sep='\t', index=None))
 
     print(f"Wrote affinity results to {out_df_file}")

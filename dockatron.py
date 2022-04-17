@@ -18,15 +18,14 @@ import platform
 import sys
 
 from contextlib import contextmanager, redirect_stdout
-from glob import glob
 from multiprocessing import Process
-from tempfile import NamedTemporaryFile
+from pathlib import Path
+from tempfile import NamedTemporaryFile, gettempdir
 from time import sleep
 from typing import List
 
 import requests
 import yaml
-
 
 import rich
 from rich import box
@@ -54,7 +53,7 @@ from textual.widgets import Button, ButtonPressed, ScrollView, Static, TreeContr
 from smina_dock import dock
 
 # Assume EquiBind is downloaded to a folder under dockatron
-EBHOME = os.path.abspath("./EquiBind")
+EBHOME = Path("./EquiBind").resolve()
 sys.path.insert(1, EBHOME)
 from EquiBind import inference
 
@@ -94,10 +93,11 @@ DEFAULT_CONTENT_LENGTHS = {
 
 DEBUG = True
 
-DATADIR = os.path.join(os.getcwd(), "dockatron_files")
-os.makedirs(DATADIR, exist_ok=True)
-OUTDIR = os.path.join(os.getcwd(), "dockatron_files", "results")
-os.makedirs(OUTDIR, exist_ok=True)
+TMPDIR = gettempdir()
+DATADIR = Path(Path.cwd(), "dockatron_files")
+DATADIR.mkdir(parents=True, exist_ok=True)
+OUTDIR = Path(Path.cwd(), "dockatron_files", "results")
+OUTDIR.mkdir(parents=True, exist_ok=True)
 
 
 # with DEBUG, all the fast options are selected
@@ -112,10 +112,27 @@ DEFAULT_EXHAUSTIVENESS = 1
 # Calling other libraries
 #
 
+def gen_dl(url, chunk_size=1_048_576, out_dir=None, out_file=None):
+    """Generator for downloading files that lets me show progress."""
+    if out_dir is not None:
+        Path(out_dir).mkdir(parents=True, exist_ok=True)
+    else:
+        out_dir = Path(".").resolve()
+
+    resp = requests.get(url, stream=True)
+    total_dl = int(resp.headers.get('content-length', DEFAULT_CONTENT_LENGTHS.get(url, 1e8)))
+    yield total_dl // chunk_size
+
+    with open(Path(out_dir, out_file) if out_file
+            else Path(out_dir, url.split('/')[-1]), 'wb') as out:
+        for data in resp.iter_content(chunk_size=chunk_size):
+            out.write(data)
+            yield
+
 @contextmanager
 def using_directory(path: str):
     """use a working directory"""
-    origin = os.getcwd()
+    origin = Path.cwd()
     try:
         os.chdir(path)
         yield
@@ -126,10 +143,13 @@ def using_directory(path: str):
 def run_equibind(config_dict):
     """Code taken directly from EquiBind/inference.py __main__"""
     # EquiBind expects a file, no matter what?
-    sys.argv.extend(["--config", "/tmp/EquiBind_placeholder.yml"])
+    placeholder_yml = Path(TMPDIR, "EquiBind_placeholder.yml")
+    if not placeholder_yml.exists():
+        placeholder_yml.touch()
+    sys.argv.extend(["--config", placeholder_yml])
 
-    # using_directory(EBHOME),
-    with io.StringIO() as f: # redirect stdout here
+    # using_directory(EBHOME) ??????
+    with io.StringIO() as f: # redirecting stdout to f
         args = inference.parse_arguments()
 
         # replace yaml with my own config_dict object
@@ -182,17 +202,17 @@ def gen_dock_equibind(inference_path:str, output_directory:str, timeout_s:int=10
         save_trajectories=False,
         num_confs = 1
     )
-
+    print(config_dict)
     # yield the total number of proteins first
-    yield len(glob(f"{inference_path}/*/*.pdb"))
+    total_pdbs = len(list(Path(inference_path).glob("*/*.pdb")))
 
     p = Process(target=run_equibind, args=(config_dict,))
     p.start()
 
     sleep_s = 10
     for _ in range(timeout_s // sleep_s):
-        num_done = len(glob(f"{output_directory}/*/lig_equibind_corrected.sdf"))
-        yield num_done
+        num_done = len(list(Path(output_directory).glob("*/lig_equibind_corrected.sdf")))
+        yield (num_done, total_pdbs)
         sleep(sleep_s)
         if not p.is_alive():
             break
@@ -216,25 +236,8 @@ def test_equibind_gen():
     raise SystemExit("finished testing equibind as a module")
 
 
-def gen_dl(url, chunk_size=1_048_576, out_dir=None, out_file=None):
-    """Generator for downloading files to show progress."""
-    if out_dir is not None:
-        os.makedirs(out_dir, exist_ok=True)
-    else:
-        out_dir = "."
-
-    resp = requests.get(url, stream=True)
-    total_dl = int(resp.headers.get('content-length', DEFAULT_CONTENT_LENGTHS.get(url, 1e8)))
-    yield total_dl // chunk_size
-
-    with open(os.path.join(out_dir, out_file) if out_file
-            else os.path.join(out_dir, url.split('/')[-1]), 'wb') as out:
-        for data in resp.iter_content(chunk_size=chunk_size):
-            out.write(data)
-            yield
-
 # def gen_dock_smina_subprocess(pdb_id, sm_id, out_tsv, exhaustiveness=1, max_sdf_confs=1):
-#     with subprocess.Popen(["python", os.path.join(os.path.abspath(os.getcwd()), "smina_dock.py"), pdb_id, sm_id,
+#     with subprocess.Popen(["python", Path(os.path.abspath(Path.cwd()), "smina_dock.py"), pdb_id, sm_id,
 #         "--exhaustiveness", str(exhaustiveness),
 #         "--max_sdf_confs", str(max_sdf_confs),
 #         "--out_tsv", out_tsv],
@@ -247,6 +250,7 @@ def gen_dl(url, chunk_size=1_048_576, out_dir=None, out_file=None):
 #         # this would output stderr to output
 #         for line in (l for l in iter(p.stderr)):
 #             yield line
+
 
 def gen_dock_smina(pdb_id:str, sm_id:str, out_tsv:str, exhaustiveness:int=DEFAULT_EXHAUSTIVENESS,
         max_sdf_confs:int=DEFAULT_MAX_SDF_CONFS, timeout_s:int=100_000):
@@ -266,7 +270,7 @@ def gen_dock_smina(pdb_id:str, sm_id:str, out_tsv:str, exhaustiveness:int=DEFAUL
         p.start()
 
     for _ in range(timeout_s // sleep_s):
-        if os.path.exists(progress_log.name):
+        if Path(progress_log.name).exists():
             with open(progress_log.name, 'r') as _f:
                 print(_f)
                 f_read = _f.read()
@@ -292,11 +296,11 @@ def gen_dock_smina(pdb_id:str, sm_id:str, out_tsv:str, exhaustiveness:int=DEFAUL
 def run_docking(pdb_id, sm_id, out_tsv, docking="smina"):
     """run docking with smina or equibind"""
     if docking=="smina":
-        yield from gen_dock_smina(pdb_id, sm_id, out_tsv)
+        yield from gen_dock_smina(pdb_id, sm_id, out_tsv=out_tsv)
     elif docking=="equibind":
-        yield from gen_dock_equibind(pdb_id, sm_id, out_tsv)
+        yield from gen_dock_equibind(inference_path=pdb_id, output_directory=sm_id)
 
-gen_dock = run_docking("6GRA", 123456, "/tmp/6GRA_123456_temp.tsv")
+gen_dock = run_docking("6GRA", 123456, "/tmp/6GRA_123456_temp.tsv", docking="equibind")
 for it in gen_dock:
     print("it", it)
 1/0
@@ -526,7 +530,7 @@ class GridTest(App):
 
             prot = self.vals.get('pdb_id') or self.vals.get('gene_name') or self.vals.get('proteome')
             sm = self.vals.get('pubchem_id') or self.vals.get('sdf') or self.vals.get('smiles')
-            out_tsv = f"{OUTDIR}/{self._get_friendly_id()}.tsv"
+            out_tsv = Path(OUTDIR, f"{self._get_friendly_id()}.tsv")
 
             dk_gener = run_docking(prot, sm, out_tsv)
 
@@ -551,7 +555,7 @@ class GridTest(App):
             message_sender.label = "Start docking"
             message_sender.button_style = "white on blue"
 
-            if os.path.exists(out_tsv):
+            if Path(out_tsv).exists():
                 self.output_md.append(f"Output to {out_tsv}")
                 await self._update_output()
             
@@ -772,9 +776,9 @@ class GridTest(App):
             "Start docking": [4, [1,2,3]]
         }
 
-        equibind_label = "EquiBind downloaded" if os.path.exists(f"{DATADIR}/EquiBind") else "Download EquiBind"
-        smina_label = "smina downloaded" if os.path.exists(f"{DATADIR}/smina") else "Download smina"
-        gnina_label = "gnina downloaded" if os.path.exists(f"{DATADIR}/gnina") else "Download gnina"
+        equibind_label = "EquiBind downloaded" if Path(DATADIR, "EquiBind").exists() else "Download EquiBind"
+        smina_label = "smina downloaded" if Path(DATADIR, "smina").exists() else "Download smina"
+        gnina_label = "gnina downloaded" if Path(DATADIR, "gnina").exists() else "Download gnina"
 
         grid.place(
             # downloads
@@ -808,7 +812,7 @@ class GridTest(App):
         await self.view.dock(self.proteome_list, edge="left", size=40, z=1)
 
         # TODO make this work
-        #if not os.path.exists(os.path.join(DATADIR, "smina")):
+        #if not Path(DATADIR, "smina").exists():
         #    self._download_smina()
 
 GridTest.run(log="textual.log")

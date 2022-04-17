@@ -73,8 +73,6 @@ URLS = {
     ("smina", "linux"): "https://sourceforge.net/projects/smina/files/smina.static/download",
     ("smina", "osx"): "https://sourceforge.net/projects/smina/files/smina.osx/download",
     ("smina", "osx12"): "https://sourceforge.net/projects/smina/files/smina.osx.12/download",
-    ("proteome", "yeast"): "https://ftp.ebi.ac.uk/pub/databases/alphafold/latest/UP000002311_559292_YEAST_v2.tar",
-    ("proteome", "human"): "https://ftp.ebi.ac.uk/pub/databases/alphafold/latest/UP000005640_9606_HUMAN_v2.tar",
 }
 
 PROTEOMES = {

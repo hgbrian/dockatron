@@ -31,11 +31,6 @@ save_trajectories: False
 num_confs: 1 # usually this should be 1
 """
 
-proteome_to_dir = {
-    "test": "test_proteome",
-    "yeast": "yeast_proteome",
-    "human": "human_proteome"
-}
 
 @contextmanager
 def using_directory(path: str):
@@ -97,10 +92,16 @@ def run_equibind(proteome_dir: str, sm_id: str, output_dir=None, out_smina_tsv=N
     if not friendly_sm_id:
         friendly_sm_id = sm_id.split("/")[-1].split('.')[0]
 
+    if not friendly_proteome_id:
+        friendly_proteome_id = proteome_dir.stem
+
     today = datetime.now().isoformat()[:10].replace("-","")
     if not output_dir:
         output_dir = Path(tempdir, f"{today}_{friendly_proteome_id}_{friendly_sm_id}")
 
+    # ----------------------------------------------------------------------------------------------
+    # Start docking
+    #
     scores = []
     df_uniprot = pd.read_csv(f"uniprot_{friendly_proteome_id}.tsv", sep='\t')[["Entry", "Gene names", "Entry name"]]
 
@@ -175,7 +176,7 @@ def run_equibind(proteome_dir: str, sm_id: str, output_dir=None, out_smina_tsv=N
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("proteome", choices=["yeast", "human", "test"])
+    parser.add_argument("proteome_dir")
     parser.add_argument("sm_id")
     parser.add_argument("--out_tsv", nargs="?")
     parser.add_argument("--output_dir", nargs="?")
@@ -183,7 +184,6 @@ if __name__ == "__main__":
     parser.add_argument("--friendly_sm_id", nargs="?")
     args = parser.parse_args()
 
-    friendly_proteome_id_g = args.proteome if not args.friendly_proteome_id else args.friendly_proteome_id
-    run_equibind(proteome_to_dir[args.proteome], args.sm_id, args.output_dir,
+    run_equibind(args.proteome_dir, args.sm_id, args.output_dir,
         friendly_sm_id=args.friendly_sm_id,
-        friendly_proteome_id=friendly_proteome_id_g)
+        friendly_proteome_id=args.friendly_proteome_id)

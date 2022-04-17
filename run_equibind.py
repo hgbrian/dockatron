@@ -31,9 +31,15 @@ save_trajectories: False
 num_confs: 1 # usually this should be 1
 """
 
+proteome_to_dir = {
+    "test": "test_proteome",
+    "yeast": "yeast_proteome",
+    "human": "human_proteome"
+}
 
 @contextmanager
 def using_directory(path: str):
+    """change directory context"""
     origin = os.getcwd()
     try:
         os.chdir(path)
@@ -59,11 +65,11 @@ def link_proteome_files(from_proteome_dir:str, to_inference_path:str, sdf_file:s
     """Copy (soft link) files to the directory structure EquiBind requires:
     {inference_path}/{protein_names}/{pdb_id}_protein.pdb,{sdf_id}_ligand.sdf
     """
-    # resolve everything because of "cp -as" peculiarities
+    # absolute path everything because of "cp -as" peculiarities
     from_proteome_dir = Path(from_proteome_dir).resolve()
     to_inference_path = Path(to_inference_path).resolve()
-
     from_sdf_path = Path(sdf_file.name).resolve()
+
     if from_sdf_path.name.endswith("_ligand.sdf"):
         to_sdf_filename = from_sdf_path.name
     else:
@@ -80,31 +86,29 @@ def link_proteome_files(from_proteome_dir:str, to_inference_path:str, sdf_file:s
         subprocess.run(["cp", "-as", from_sdf_path, Path(to_inference_path, dr, to_sdf_filename)], check=True)
 
 
-def run_equibind(proteome: str, sm_id: str, output_dir=None, out_smina_tsv=None, friendly_id=None):
+def run_equibind(proteome_dir: str, sm_id: str, output_dir=None, out_smina_tsv=None,
+        friendly_sm_id=None, friendly_proteome_id=None):
     """Run equibind against a proteome"""
-    proteome_dir = Path(f"{proteome}_proteome").resolve()
+    proteome_dir = Path(proteome_dir).resolve()
 
-    if "." in sm_id:
-        sdf = open(sm_id).read()
-    else:
-        sdf_2d, sdf_3d = smina_dock.download_sdf(sm_id)
-        sdf = sdf_3d if sdf_3d else sdf_2d
+    sdf_3d, sdf_from_smiles = smina_dock.sm_id_to_sdfs(sm_id, max_sdf_confs=1, seed=1)
+    sdf = sdf_3d if sdf_3d is not None else sdf_from_smiles
 
-    if not friendly_id:
-        friendly_id = sm_id.split("/")[-1].split('.')[0]
+    if not friendly_sm_id:
+        friendly_sm_id = sm_id.split("/")[-1].split('.')[0]
 
     today = datetime.now().isoformat()[:10].replace("-","")
     if not output_dir:
-        output_dir = Path(tempdir, f"{today}_{proteome}_{friendly_id}")
+        output_dir = Path(tempdir, f"{today}_{friendly_proteome_id}_{friendly_sm_id}")
 
     scores = []
-    df_uniprot = pd.read_csv(f"uniprot_{proteome}.tsv", sep='\t')[["Entry", "Gene names", "Entry name"]]
+    df_uniprot = pd.read_csv(f"uniprot_{friendly_proteome_id}.tsv", sep='\t')[["Entry", "Gene names", "Entry name"]]
 
     with NamedTemporaryFile('w', suffix=".yml") as config_file, \
         TemporaryDirectory() as sdf_dir, \
         TemporaryDirectory() as input_dir:
 
-        sdf_file = open(Path(sdf_dir, f"{friendly_id}_ligand.sdf"), 'w')
+        sdf_file = open(Path(sdf_dir, f"{friendly_sm_id}_ligand.sdf"), 'w')
         sdf_file.write(sdf)
         sdf_file.flush()
 
@@ -133,7 +137,7 @@ def run_equibind(proteome: str, sm_id: str, output_dir=None, out_smina_tsv=None,
                 assert len(pdb_file) == 1, f"proteome directory error: {proteome_dir}/{pid}"
                 pdb_file = pdb_file[0]
 
-                scores.append((pid, sm_id, friendly_id))
+                scores.append((pid, sm_id, friendly_sm_id))
 
                 pjobs.append(dask.delayed(smina_score)(
                     pdb_file = pdb_file.as_posix(), #Path(proteome_dir, pid, pdb[0]),
@@ -149,8 +153,11 @@ def run_equibind(proteome: str, sm_id: str, output_dir=None, out_smina_tsv=None,
             print(df_res)
             #scores = [list(s) + [pj] for s, pj in zip(scores, pjobs_res)]
 
-    out_df_file = Path(output_dir, f"{today}_{proteome}_{friendly_id}_equibind_smina.tsv")
-    df_scores = (df_res #(pd.DataFrame(scores, columns=["pid", "sm_id", "friendly_id", "smina_kcal_mol"])
+    # ----------------------------------------------------------------------------------------------
+    # Output
+    #
+    out_df_file = Path(output_dir, f"{today}_{friendly_proteome_id}_{friendly_sm_id}_equibind_smina.tsv")
+    df_scores = (df_res #(pd.DataFrame(scores, columns=["pid", "sm_id", "friendly_sm_id", "smina_kcal_mol"])
         .assign(pdb_id = lambda df: df.pdb_id.apply(lambda o: o.split('/')[-1]))
         .assign(sm_id = lambda df: df.sm_id.apply(lambda o: o.split('/')[-1]))
         .assign(dock_bin = lambda df: "EquiBind + smina")
@@ -172,7 +179,11 @@ if __name__ == "__main__":
     parser.add_argument("sm_id")
     parser.add_argument("--out_tsv", nargs="?")
     parser.add_argument("--output_dir", nargs="?")
-    parser.add_argument("--friendly_id", nargs="?")
+    parser.add_argument("--friendly_proteome_id", nargs="?")
+    parser.add_argument("--friendly_sm_id", nargs="?")
     args = parser.parse_args()
 
-    run_equibind(args.proteome, args.sm_id, args.output_dir, args.friendly_id)
+    friendly_proteome_id_g = args.proteome if not args.friendly_proteome_id else args.friendly_proteome_id
+    run_equibind(proteome_to_dir[args.proteome], args.sm_id, args.output_dir,
+        friendly_sm_id=args.friendly_sm_id,
+        friendly_proteome_id=friendly_proteome_id_g)

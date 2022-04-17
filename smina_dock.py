@@ -258,7 +258,7 @@ def pdb_to_coords(pdb: str, pdb_id:Optional[str]=None, min_mol_size:float = 3.0)
             if len(coords) >= min_mol_size}
 
 
-def sm_id_to_smiles(sm_id:str) -> tuple:
+def sm_id_to_sdfs(sm_id:str, max_sdf_confs:int=1, seed:int=1) -> tuple:
     """Small molecule id (pubchem id, sdf filepath, smiles)
     to two kinds of SDF files (inferred 3d and recorded 3d)
     """
@@ -301,7 +301,7 @@ def dock(pdb_id:str,
     """smina or gnina dock from a PDB id and a (pubchem) small molecule id
     """
 
-    sdf_3d, sdf_from_smiles = sm_id_to_smiles(sm_id)
+    sdf_3d, sdf_from_smiles = sm_id_to_sdfs(sm_id, max_sdf_confs, seed)
     if sdf_3d is None and sdf_from_smiles is None:
         raise SystemExit(f"Fatal Error: No sdf file for {sm_id}")
 

@@ -12,6 +12,7 @@ Dockatron relies on the following tools:
 - Jumper, J et al. Highly accurate protein structure prediction with AlphaFold. Nature (2021).
 - Varadi, M et al. AlphaFold Protein Structure Database: massively expanding the structural coverage of protein-sequence space with high-accuracy models. Nucleic Acids Research (2021).
 """
+
 import io
 import multiprocessing
 import os
@@ -26,7 +27,6 @@ from tempfile import NamedTemporaryFile, mkdtemp, gettempdir
 from time import sleep
 from typing import List, Optional, Union
 
-import dask
 import pandas as pd
 import requests
 import yaml

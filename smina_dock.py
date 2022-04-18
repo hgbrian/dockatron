@@ -285,7 +285,8 @@ def sm_id_to_sdfs(sm_id:str, max_sdf_confs:int=1, seed:int=1) -> tuple:
     """
     if str(sm_id).endswith(".sdf"):
         sdf_from_smiles = None
-        sdf_3d = open(sm_id).read()
+        with open(sm_id) as sdf_3d_file:
+            sdf_3d = sdf_3d_file.read()
     else:
         if str(sm_id).isdigit():  # then it is a pubchem id
             sm_smiles = download_smiles(sm_id)
@@ -343,9 +344,9 @@ def dock(pdb_id:str,
     pdb_no_hets = "\n".join(line for line in pdb.splitlines() if not line.startswith("HETATM"))
     pdb_hets_coords = pdb_to_coords(pdb_hets) if pdb_hets else []
 
-    print(f"Remove hetatms for {pdb_id}\n"
-          f"lines without HETATMS:   {len([l for l in pdb_no_hets.splitlines() if not l.startswith('REMARK')])}\n"
-          f"lines with only HETATMS: {len([l for l in pdb_hets.splitlines() if not l.startswith('REMARK')])}")
+    #print(f"Remove hetatms for {pdb_id}\n"
+    #      f"lines without HETATMS:   {len([l for l in pdb_no_hets.splitlines() if not l.startswith('REMARK')])}\n"
+    #      f"lines with only HETATMS: {len([l for l in pdb_hets.splitlines() if not l.startswith('REMARK')])}")
 
     pdb_parser = PDB.PDBParser()
     if is_pdb_no_hetatm is True:
@@ -366,8 +367,8 @@ def dock(pdb_id:str,
             autobox_ligand=autobox_ligand, smina_args=smina_args, progress_log=progress_log)
 
         for n, docked_sdf in enumerate([ds for ds in docked_sdfs.split('$$$$\n') if ds.strip()]):
-            if n < 3:
-                sys.stderr.write(f"{n+1: 2d}:nearest {pdb_id} {sm_id} {get_nearest_res(docked_sdf, pdb_obj)}\n")
+            #if n < 3:
+            #    sys.stderr.write(f"{n+1: 2d}:nearest {pdb_id} {sm_id} {get_nearest_res(docked_sdf, pdb_obj)}\n")
 
             sdf_coords, scores_d = sdf_to_coords_scores(docked_sdf)
             assert "minimizedAffinity" in scores_d, f"no minimizedAffinity found in {scores_d}"

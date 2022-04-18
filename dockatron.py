@@ -140,7 +140,6 @@ def dock_equibind(config_dict):
     placeholder_yml = Path(TMPDIR, "EquiBind_placeholder.yml")
     if not placeholder_yml.exists():
         placeholder_yml.touch()
-
     sys.argv.extend(["--config", placeholder_yml.as_posix()])
 
     with io.StringIO() as f: # redirecting stdout to f
@@ -219,7 +218,7 @@ def gen_dock_equibind(inference_path:str, output_directory:str, timeout_s:int=10
 
         return scored
 
-    #
+    # ----------------------------------------------------------------------------------------------
     # Iterate over files output by EquiBind and yield a progress indicator
     #
     sleep_s = 1
@@ -245,25 +244,13 @@ def gen_dock_equibind(inference_path:str, output_directory:str, timeout_s:int=10
     scored = _score_poses_with_smina(done_sdfs, scored)
 
     # FIXFIX maybe change dock_bin, sort, etc
-    df_out = pd.concat(scored.values())
-    df_out.to_csv(Path(output_directory, f"{output_directory.name}.tsv"), sep='\t', index=None)
-    print("done EB", Path(output_directory, f"{output_directory.name}.tsv"))
-    return
-
-
-def test_equibind_gen():
-    """Run EquiBind in a Process to get progress"""
-
-    eb_iter = gen_dock_equibind(
-        inference_path=f"{EB_HOME}/../mycophenolic_acid_test",
-        output_directory=f"{EB_HOME}/data/results/output/mycophenolic_acid_yeast"
+    df_out = (pd.concat(scored.values())
+      .assign(dock_bin = "EquiBind + smina")
+      .sort_values("minimizedAffinity")
     )
-
-    total_prots = next(eb_iter)
-    for p in eb_iter:
-        print(p, total_prots)
-
-    raise SystemExit("finished testing equibind as a module")
+    df_out.to_csv(Path(output_directory, f"{Path(output_directory).name}.tsv"), sep='\t', index=None)
+    print("done EB", Path(output_directory, f"{Path(output_directory).name}.tsv"))
+    return
 
 
 def _smina_score_one(pdb_file: str, sdf_file: str, score_type:str="minimize") -> pd.DataFrame:
@@ -368,7 +355,23 @@ def run_docking(pdb_id:str, sm_id:Union[str, int], out_tsv:str,
         yield (inference_path, output_directory)
         yield from gen_dock_equibind(inference_path, output_directory)
 
-# 6GRA fails?
+
+def test_equibind_gen():
+    """Run EquiBind in a Process to get progress"""
+
+    gen_dock = gen_dock_equibind(
+        inference_path=f"{EB_HOME}/../mycophenolic_acid_test",
+        output_directory=f"{EB_HOME}/data/results/output/mycophenolic_acid_test"
+    )
+    inference_path, output_directory = next(gen_dock)
+
+    for p in gen_dock:
+        print(p)
+    print("done?22", output_directory)
+
+    raise SystemExit("finished testing equibind as a module")
+
+
 def test_equibind2():
     """Test EquiBind"""
     pdb_id = "6GRI"
@@ -383,7 +386,7 @@ def test_equibind2():
     #df_res = smina_score_dirs(inference_path, output_directory)
     print("done?", output_directory)
 
-test_equibind2()
+test_equibind_gen()
 1/0
 
 # --------------------------------------------------------------------------------------------------

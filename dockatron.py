@@ -261,7 +261,7 @@ def test_equibind_gen():
 def smina_score_dirs(proteome_dir:str, output_dir:str, num_workers:int=DEFAULT_NUM_WORKERS) -> str:
     """Given a pdb and an sdf. Minimize with smina to get an affinity"""
 
-    def _smina_score_one(pdb_file: str, sdf_file: str, score_type="minimize"):
+    def _smina_score_one(_pdb_file: str, _sdf_file: str, score_type:str="minimize") -> pd.DataFrame:
         """Use smina to score a docked position"""
         if score_type == "minimize":
             smina_args = ["--local_only", "--minimize"]
@@ -270,22 +270,23 @@ def smina_score_dirs(proteome_dir:str, output_dir:str, num_workers:int=DEFAULT_N
         else:
             raise ValueError(f"score_type is {score_type}")
 
-        df_sm = smina_dock.dock(pdb_file, sdf_file, max_sdf_confs=1,
+        df_sm = smina_dock.dock(_pdb_file, _sdf_file, max_sdf_confs=1,
             smina_args=smina_args)
 
         return df_sm
 
+    #
     # Run smina in parallel to get affinity
+    #
     pjobs = []
     for pid in [d.name for d in Path(proteome_dir).iterdir() if Path(proteome_dir, d).is_dir()]:
         pdb_file = list(Path(proteome_dir, pid).glob("*.pdb"))
-        print(proteome_dir, pdb_file)
         assert len(pdb_file) == 1, f"proteome directory error: {Path(proteome_dir, pid)}"
         pdb_file = pdb_file[0]
 
         pjobs.append(dask.delayed(_smina_score_one)(
-            pdb_file = pdb_file.as_posix(),
-            sdf_file = Path(output_dir, pid, EB_SDF_NAME).as_posix(),
+            pdb_file.as_posix(),
+            Path(output_dir, pid, EB_SDF_NAME).as_posix(),
             score_type = "minimize"
             )
         )
@@ -383,25 +384,23 @@ def run_docking(pdb_id:str, sm_id:Union[str, int], out_tsv:str,
         yield from gen_dock_smina(pdb_id, sm_id, out_tsv=out_tsv)
     elif docking=="equibind":
         inference_path = prep_equibind_dir(pdb_id, sm_id)
-        yield inference_path
+        today = datetime.now().isoformat()[2:10].replace("-","")
+        output_directory = Path(gettempdir(), f"{today}_{pdb_id}_{sm_id}")
+        yield (inference_path, output_directory)
         yield from gen_dock_equibind(inference_path, output_directory)
-
 
 # 6GRA fails?
 def test_equibind2():
     """Test EquiBind"""
     pdb_id = "6GRI"
     sm_id = 123456
-    today = datetime.now().isoformat()[2:10].replace("-","")
-    output_directory_g = Path(gettempdir(), f"{today}_{pdb_id}_{sm_id}")
-    gen_dock = run_docking(pdb_id, sm_id, f"/tmp/{pdb_id}_{sm_id}_temp.tsv",
-        output_directory=output_directory_g.as_posix(), docking="equibind")
+    gen_dock = run_docking(pdb_id, sm_id, f"/tmp/{pdb_id}_{sm_id}_temp.tsv", docking="equibind")
 
-    inference_path = next(gen_dock)
+    inference_path, output_directory = next(gen_dock)
     for it in gen_dock:
         print("it", it)
-    df_res = smina_score_dirs(inference_path, output_directory_g)
-    print("done?", output_directory_g)
+    df_res = smina_score_dirs(inference_path, output_directory)
+    print("done?", output_directory)
     print(df_res)
 
 test_equibind2()
@@ -634,7 +633,8 @@ class GridTest(App):
             sm = self.vals.get('pubchem_id') or self.vals.get('sdf') or self.vals.get('smiles')
             out_tsv = Path(OUTDIR, f"{self._get_friendly_id()}.tsv")
 
-            dk_gener = run_docking(prot, sm, out_tsv)
+            dk_gener = run_docking(prot, sm, out_tsv, docking="equibind")
+            inference_path, output_directory = next(dk_gener)
 
             # ---------------------------------------------------------------
             # Progress bar for docking -- max_sdf_confs is not known though?

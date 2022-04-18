@@ -277,21 +277,6 @@ def test_equibind_gen():
     raise SystemExit("finished testing equibind as a module")
 
 
-# def gen_dock_smina_subprocess(pdb_id, sm_id, out_tsv, exhaustiveness=1, max_sdf_confs=1):
-#     with subprocess.Popen(["python", Path(os.path.abspath(Path.cwd()), "smina_dock.py"), pdb_id, sm_id,
-#         "--exhaustiveness", str(exhaustiveness),
-#         "--max_sdf_confs", str(max_sdf_confs),
-#         "--out_tsv", out_tsv],
-#         bufsize=1, universal_newlines=True,
-#         stdout=subprocess.PIPE, stderr=subprocess.PIPE) as p:
-
-#         for line in (l for l in iter(p.stdout) if "Refine time" in l):
-#             yield
-
-#         # this would output stderr to output
-#         for line in (l for l in iter(p.stderr)):
-#             yield line
-
 def _smina_score_one(pdb_file: str, sdf_file: str, score_type:str="minimize") -> pd.DataFrame:
     """Use smina to score a docked position"""
     if score_type == "minimize":
@@ -304,28 +289,6 @@ def _smina_score_one(pdb_file: str, sdf_file: str, score_type:str="minimize") ->
     df_sm = smina_dock.dock(pdb_file, sdf_file, max_sdf_confs=1, smina_args=smina_args)
 
     return df_sm
-
-def smina_score_dirs(proteome_dir:str, output_dir:str, num_workers:int=DEFAULT_NUM_WORKERS) -> str:
-    """Given a pdb and an sdf. Minimize with smina to get an affinity"""
-    #
-    # Run smina in parallel to get affinity
-    #
-    pjobs = []
-    for pid in [d.name for d in Path(proteome_dir).iterdir() if Path(proteome_dir, d).is_dir()]:
-        pdb_file = list(Path(proteome_dir, pid).glob("*.pdb"))
-        assert len(pdb_file) == 1, f"proteome directory error: {Path(proteome_dir, pid)}"
-        pdb_file = pdb_file[0]
-
-        pjobs.append(dask.delayed(_smina_score_one)(
-            pdb_file.as_posix(),
-            Path(output_dir, pid, EB_SDF_NAME).as_posix(),
-            score_type = "minimize"
-            )
-        )
-
-    df_res = pd.concat(dask.compute(*pjobs, num_workers=num_workers))
-
-    return df_res
 
 
 def gen_dock_smina(pdb_id:str, sm_id:str, out_tsv:str, exhaustiveness:int=DEFAULT_EXHAUSTIVENESS,
@@ -361,12 +324,6 @@ def gen_dock_smina(pdb_id:str, sm_id:str, out_tsv:str, exhaustiveness:int=DEFAUL
 
     return
 
-# def gen_dock_equibind_subprocess(pdb_id, sm_id, out_tsv):
-#     with subprocess.Popen(["python", "run_equibind.py", "test", "123456"],
-#         bufsize=1, universal_newlines=True,
-#         stdout=subprocess.PIPE, stderr=subprocess.PIPE) as p:
-#         for line in (l for l in iter(p.stdout) if "Refine time" in l):
-#             yield
 
 def prep_equibind_dir(pdb_or_proteome_id:str, sm_id:str):
     """Place PDB and SDF files in a directory for EquiBind to process"""

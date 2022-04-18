@@ -13,6 +13,7 @@ Dockatron relies on the following tools:
 - Varadi, M et al. AlphaFold Protein Structure Database: massively expanding the structural coverage of protein-sequence space with high-accuracy models. Nucleic Acids Research (2021).
 """
 import io
+import multiprocessing
 import os
 import platform
 import sys
@@ -23,8 +24,10 @@ from multiprocessing import Process
 from pathlib import Path
 from tempfile import NamedTemporaryFile, mkdtemp, gettempdir
 from time import sleep
-from typing import List
+from typing import List, Optional, Union
 
+import dask
+import pandas as pd
 import requests
 import yaml
 
@@ -55,8 +58,9 @@ import smina_dock
 import run_equibind
 
 # Assume EquiBind is downloaded to a folder under dockatron
-EBHOME = Path("./EquiBind").resolve()
-sys.path.insert(1, EBHOME.as_posix())
+EB_HOME = Path("./EquiBind").resolve().as_posix()
+EB_SDF_NAME = "lig_equibind_corrected.sdf"
+sys.path.insert(1, EB_HOME)
 from EquiBind import inference
 
 # --------------------------------------------------------------------------------------------------
@@ -99,14 +103,13 @@ DATADIR.mkdir(parents=True, exist_ok=True)
 OUTDIR = Path(Path.cwd(), "dockatron_files", "results")
 OUTDIR.mkdir(parents=True, exist_ok=True)
 
-
 # with DEBUG, all the fast options are selected
 DEFAULT_MAX_SDF_CONFS = 1 if DEBUG else 4
 DEFAULT_EXHAUSTIVENESS = 1 if DEBUG else 8
+DEFAULT_NUM_WORKERS = int(max(1, round(multiprocessing.cpu_count() * .75)))
 
 # FIXFIX
 DEFAULT_MAX_SDF_CONFS = 10
-DEFAULT_EXHAUSTIVENESS = 1
 
 # --------------------------------------------------------------------------------------------------
 # Calling other libraries
@@ -150,7 +153,7 @@ def dock_equibind(config_dict):
 
     sys.argv.extend(["--config", placeholder_yml.as_posix()])
 
-    # using_directory(EBHOME) maybe ??????
+    # using_directory(EB_HOME) maybe ??????
     with io.StringIO() as f: # redirecting stdout to f
         args = inference.parse_arguments()
 
@@ -169,8 +172,8 @@ def dock_equibind(config_dict):
 
         with redirect_stdout(f):
             for run_dir in args.run_dirs:
-                args.checkpoint = f'{EBHOME}/runs/{run_dir}/best_checkpoint.pt'
-                config_dict['checkpoint'] = f'{EBHOME}/runs/{run_dir}/best_checkpoint.pt'
+                args.checkpoint = f'{EB_HOME}/runs/{run_dir}/best_checkpoint.pt'
+                config_dict['checkpoint'] = f'{EB_HOME}/runs/{run_dir}/best_checkpoint.pt'
                 # overwrite args with args from checkpoint except for the args that were contained in the config file
                 arg_dict = args.__dict__
                 with open(os.path.join(os.path.dirname(args.checkpoint), 'train_arguments.yaml'), 'r') as arg_file:
@@ -210,16 +213,18 @@ def gen_dock_equibind(inference_path:str, output_directory:str, timeout_s:int=10
     p.start()
 
     total_pdbs = len(list(Path(inference_path).glob("*/*.pdb")))
-    sleep_s = 10
+    sleep_s = 1
     for _ in range(timeout_s // sleep_s):
-        num_done = len(list(Path(output_directory).glob("*/lig_equibind_corrected.sdf")))
+        num_done = len(list(Path(output_directory).glob(f"*/{EB_SDF_NAME}")))
         yield (num_done, total_pdbs)
         sleep(sleep_s)
+        sleep_s = min(sleep_s + 2, 10)
         if not p.is_alive():
             break
     else:
         raise TimeoutError(f"EquiBind failed to finish before {timeout_s}")
 
+    print("done EB")
     return
 
 
@@ -227,8 +232,8 @@ def test_equibind_gen():
     """Run EquiBind in a Process to get progress"""
 
     eb_iter = gen_dock_equibind(
-        inference_path=f"{EBHOME}/../mycophenolic_acid_test",
-        output_directory=f"{EBHOME}/data/results/output/mycophenolic_acid_yeast"
+        inference_path=f"{EB_HOME}/../mycophenolic_acid_test",
+        output_directory=f"{EB_HOME}/data/results/output/mycophenolic_acid_yeast"
     )
 
     total_prots = next(eb_iter)
@@ -252,6 +257,42 @@ def test_equibind_gen():
 #         # this would output stderr to output
 #         for line in (l for l in iter(p.stderr)):
 #             yield line
+
+def smina_score_dirs(proteome_dir:str, output_dir:str, num_workers:int=DEFAULT_NUM_WORKERS) -> str:
+    """Given a pdb and an sdf. Minimize with smina to get an affinity"""
+
+    def _smina_score_one(pdb_file: str, sdf_file: str, score_type="minimize"):
+        """Use smina to score a docked position"""
+        if score_type == "minimize":
+            smina_args = ["--local_only", "--minimize"]
+        elif score_type == "score_only":
+            smina_args = ["--score_only"]
+        else:
+            raise ValueError(f"score_type is {score_type}")
+
+        df_sm = smina_dock.dock(pdb_file, sdf_file, max_sdf_confs=1,
+            smina_args=smina_args)
+
+        return df_sm
+
+    # Run smina in parallel to get affinity
+    pjobs = []
+    for pid in [d.name for d in Path(proteome_dir).iterdir() if Path(proteome_dir, d).is_dir()]:
+        pdb_file = list(Path(proteome_dir, pid).glob("*.pdb"))
+        print(proteome_dir, pdb_file)
+        assert len(pdb_file) == 1, f"proteome directory error: {Path(proteome_dir, pid)}"
+        pdb_file = pdb_file[0]
+
+        pjobs.append(dask.delayed(_smina_score_one)(
+            pdb_file = pdb_file.as_posix(),
+            sdf_file = Path(output_dir, pid, EB_SDF_NAME).as_posix(),
+            score_type = "minimize"
+            )
+        )
+
+    df_res = pd.concat(dask.compute(*pjobs, num_workers=num_workers))
+
+    return df_res
 
 
 def gen_dock_smina(pdb_id:str, sm_id:str, out_tsv:str, exhaustiveness:int=DEFAULT_EXHAUSTIVENESS,
@@ -309,7 +350,7 @@ def prep_equibind_dir(pdb_or_proteome_id:str, sm_id:str):
 
     # either link from a pdb or a proteome
     try:
-        pdb_str = smina_dock.download_pdb(pdb_or_proteome_id)
+        pdb_str = smina_dock.fix_pdb(smina_dock.get_or_download_pdb(pdb_or_proteome_id))
         proteome_dir = None
     except requests.exceptions.HTTPError:
         if Path(proteome_dir).exists():
@@ -318,7 +359,9 @@ def prep_equibind_dir(pdb_or_proteome_id:str, sm_id:str):
         else:
             raise FileNotFoundError("no pdb url, pdb file or proteome directory found") from None
 
-    print(proteome_dir, inference_path, sdf_file.name)
+    #
+    # If there is no proteome supplied, then create a single-protein "proteome" compatible with EquiBind
+    #
     if proteome_dir is None:
         proteome_dir = mkdtemp(prefix="proteome_")
         protein_dir = mkdtemp(dir=proteome_dir, prefix="protein_")
@@ -333,21 +376,35 @@ def prep_equibind_dir(pdb_or_proteome_id:str, sm_id:str):
 
     return inference_path
 
-def run_docking(pdb_id, sm_id, out_tsv, docking="smina"):
+def run_docking(pdb_id:str, sm_id:Union[str, int], out_tsv:str,
+        output_directory:Optional[str]=None, docking:str="smina"):
     """run docking with smina or equibind"""
     if docking=="smina":
         yield from gen_dock_smina(pdb_id, sm_id, out_tsv=out_tsv)
     elif docking=="equibind":
         inference_path = prep_equibind_dir(pdb_id, sm_id)
-        today = datetime.now().isoformat()[2:10].replace("-","")
-        output_directory = Path(gettempdir(), f"{today}_{pdb_id}_{sm_id}")
+        yield inference_path
+        yield from gen_dock_equibind(inference_path, output_directory)
 
-        yield from gen_dock_equibind(inference_path, output_directory.as_posix())
 
-# 6GRA fails
-gen_dock = run_docking("6GRA", 123456, "/tmp/6GRA_123456_temp.tsv", docking="equibind")
-for it in gen_dock:
-    print("it", it)
+# 6GRA fails?
+def test_equibind2():
+    """Test EquiBind"""
+    pdb_id = "6GRI"
+    sm_id = 123456
+    today = datetime.now().isoformat()[2:10].replace("-","")
+    output_directory_g = Path(gettempdir(), f"{today}_{pdb_id}_{sm_id}")
+    gen_dock = run_docking(pdb_id, sm_id, f"/tmp/{pdb_id}_{sm_id}_temp.tsv",
+        output_directory=output_directory_g.as_posix(), docking="equibind")
+
+    inference_path = next(gen_dock)
+    for it in gen_dock:
+        print("it", it)
+    df_res = smina_score_dirs(inference_path, output_directory_g)
+    print("done?", output_directory_g)
+    print(df_res)
+
+test_equibind2()
 1/0
 
 # --------------------------------------------------------------------------------------------------

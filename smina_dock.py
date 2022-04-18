@@ -90,7 +90,7 @@ def download_sdf(pubchem_id: str) -> Tuple[str, str]:
     return sdf_2d, sdf_3d
 
 
-def download_pdb(pdb_id: str) -> str:
+def get_or_download_pdb(pdb_id: str) -> str:
     """Download pdb file as a string from rcsb.org"""
     # pdb file
     if pdb_id.endswith('.pdb'):
@@ -149,7 +149,7 @@ def run_smina(pdb: str,
 
         # default autobox_ligand is the pdb file + 4 Angstroms
         if autobox_ligand is not None:
-            autobox_ligand_text = download_pdb(autobox_ligand)
+            autobox_ligand_text = get_or_download_pdb(autobox_ligand)
             with NamedTemporaryFile('w', suffix='.pdb', delete=False) as inf_al:
                 inf_al.write(autobox_ligand_text)
         else:
@@ -211,6 +211,26 @@ def get_nearest_res(docked_sdf: str, pdb_obj) -> str:
             mindist_chain = (np.min(dists), chain)
 
     return mindist_chain[1]
+
+
+def fix_pdb(pdb: str) -> str:
+    """Fix / normalize pdb, add Hs, remove HETATMs. Necessary for EquiBind"""
+
+    with NamedTemporaryFile('w', suffix='.pdb', delete=True) as inf_pdb, \
+            NamedTemporaryFile("r+", suffix='.pdb', delete=False) as outf_pdb:
+        inf_pdb.write(pdb)
+        inf_pdb.flush()
+
+        subprocess.run([OBABEL_BIN, inf_pdb.name, "-h", "-O", outf_pdb.name],
+            capture_output=True, check=True)
+
+        outf_pdb.flush()
+        outf_pdb.seek(0)
+        fixed_pdb = ''.join([l for l in outf_pdb.readlines() if not l.startswith("HETATM")])
+
+    assert len(fixed_pdb) > 0, f"{OBABEL_BIN} may have had a segfault"
+
+    return fixed_pdb
 
 
 def pdb_to_pdbqt(pdb: str) -> str:
@@ -312,7 +332,7 @@ def dock(pdb_id:str,
     # because if i include HETATMs then it obstructs the binding pocket
     # use sdf_from_smiles sdf_3d
     #
-    pdb = download_pdb(pdb_id)
+    pdb = get_or_download_pdb(pdb_id)
     if pdb is None:
         raise SystemExit(f"Fatal Error: No pdb file for {pdb_id}")
 

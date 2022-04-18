@@ -213,18 +213,52 @@ def gen_dock_equibind(inference_path:str, output_directory:str, timeout_s:int=10
     p.start()
 
     total_pdbs = len(list(Path(inference_path).glob("*/*.pdb")))
+
+    def _score_poses_with_smina(done_sdfs: set, scored: dict) -> dict:
+        poses_to_process = set(done_sdfs) - set(scored.keys())
+
+        for sdf_file_path in poses_to_process:
+            try:
+                sdf_file_path.rename(sdf_file_path)
+            except PermissionError:
+                sleep(1) # more than enough time to write an sdf file; if it fails, error out
+                sdf_file_path.rename(sdf_file_path)
+
+            pid = sdf_file_path.parent.name
+            pdb_file_path = list(Path(inference_path, pid).glob(f"*_protein.pdb"))[0]
+            scored[sdf_file_path] = _smina_score_one(pdb_file_path.as_posix(), sdf_file_path.as_posix())
+
+        return scored
+
+    #
+    # Iterate over files output by EquiBind and yield a progress indicator
+    #
     sleep_s = 1
+    scored = {}
     for _ in range(timeout_s // sleep_s):
-        num_done = len(list(Path(output_directory).glob(f"*/{EB_SDF_NAME}")))
-        yield (num_done, total_pdbs)
+        done_sdfs = set(Path(output_directory).glob(f"*/{EB_SDF_NAME}"))
+        yield (len(done_sdfs), total_pdbs)
+
+        scored = _score_poses_with_smina(done_sdfs, scored)
         sleep(sleep_s)
         sleep_s = min(sleep_s + 2, 10)
         if not p.is_alive():
             break
     else:
-        raise TimeoutError(f"EquiBind failed to finish before {timeout_s}")
+        raise TimeoutError(f"EquiBind failed to finish before {timeout_s} seconds")
 
-    print("done EB")
+    # ----------------------------------------------------------------------------------------------
+    # Output DataFrame
+    #
+
+    # Finish off any remaining smina scoring
+    done_sdfs = set(Path(output_directory).glob(f"*/{EB_SDF_NAME}"))
+    scored = _score_poses_with_smina(done_sdfs, scored)
+
+    # FIXFIX maybe change dock_bin, sort, etc
+    df_out = pd.concat(scored.values())
+    df_out.to_csv(Path(output_directory, f"{output_directory.name}.tsv"), sep='\t', index=None)
+    print("done EB", Path(output_directory, f"{output_directory.name}.tsv"))
     return
 
 
@@ -258,23 +292,21 @@ def test_equibind_gen():
 #         for line in (l for l in iter(p.stderr)):
 #             yield line
 
+def _smina_score_one(pdb_file: str, sdf_file: str, score_type:str="minimize") -> pd.DataFrame:
+    """Use smina to score a docked position"""
+    if score_type == "minimize":
+        smina_args = ["--local_only", "--minimize"]
+    elif score_type == "score_only":
+        smina_args = ["--score_only"]
+    else:
+        raise ValueError(f"score_type is {score_type}")
+
+    df_sm = smina_dock.dock(pdb_file, sdf_file, max_sdf_confs=1, smina_args=smina_args)
+
+    return df_sm
+
 def smina_score_dirs(proteome_dir:str, output_dir:str, num_workers:int=DEFAULT_NUM_WORKERS) -> str:
     """Given a pdb and an sdf. Minimize with smina to get an affinity"""
-
-    def _smina_score_one(_pdb_file: str, _sdf_file: str, score_type:str="minimize") -> pd.DataFrame:
-        """Use smina to score a docked position"""
-        if score_type == "minimize":
-            smina_args = ["--local_only", "--minimize"]
-        elif score_type == "score_only":
-            smina_args = ["--score_only"]
-        else:
-            raise ValueError(f"score_type is {score_type}")
-
-        df_sm = smina_dock.dock(_pdb_file, _sdf_file, max_sdf_confs=1,
-            smina_args=smina_args)
-
-        return df_sm
-
     #
     # Run smina in parallel to get affinity
     #
@@ -340,7 +372,7 @@ def prep_equibind_dir(pdb_or_proteome_id:str, sm_id:str):
     """Place PDB and SDF files in a directory for EquiBind to process"""
 
     # input directory to equibind
-    inference_path = mkdtemp(prefix="equibind_")
+    inference_path = mkdtemp(prefix="inference_")
 
     sdf_3d, sdf_from_smiles = smina_dock.sm_id_to_sdfs(sm_id)
     sdf = sdf_3d if sdf_3d is not None else sdf_from_smiles
@@ -364,10 +396,11 @@ def prep_equibind_dir(pdb_or_proteome_id:str, sm_id:str):
     # If there is no proteome supplied, then create a single-protein "proteome" compatible with EquiBind
     #
     if proteome_dir is None:
-        proteome_dir = mkdtemp(prefix="proteome_")
-        protein_dir = mkdtemp(dir=proteome_dir, prefix="protein_")
+        pdb_id = pdb_or_proteome_id
 
-        with NamedTemporaryFile('w', prefix=pdb_or_proteome_id, suffix="_protein.pdb", dir=protein_dir, delete=False) as pdb_file:
+        proteome_dir = mkdtemp(prefix="proteome_")
+        Path(proteome_dir, pdb_id).mkdir()
+        with open(Path(proteome_dir, pdb_id, f"{pdb_id}_protein.pdb"), 'w') as pdb_file:
             pdb_file.write(pdb_str)
             pdb_file.flush()
 
@@ -397,11 +430,12 @@ def test_equibind2():
     gen_dock = run_docking(pdb_id, sm_id, f"/tmp/{pdb_id}_{sm_id}_temp.tsv", docking="equibind")
 
     inference_path, output_directory = next(gen_dock)
+    print(inference_path, output_directory)
+
     for it in gen_dock:
         print("it", it)
-    df_res = smina_score_dirs(inference_path, output_directory)
+    #df_res = smina_score_dirs(inference_path, output_directory)
     print("done?", output_directory)
-    print(df_res)
 
 test_equibind2()
 1/0

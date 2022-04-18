@@ -42,7 +42,7 @@ def using_directory(path: str):
     finally:
         os.chdir(origin)
 
-def smina_score(pdb_file: str, sdf_file: str, out_tsv:str = None, score_type="minimize"):
+def smina_score(pdb_file: str, sdf_file: str, score_type="minimize"):
     """Use smina to score a docked position"""
     if score_type == "minimize":
         smina_args = ["--local_only", "--minimize"]
@@ -52,7 +52,7 @@ def smina_score(pdb_file: str, sdf_file: str, out_tsv:str = None, score_type="mi
         raise ValueError(f"score_type is {score_type}")
 
     df_sm = smina_dock.dock(pdb_file, sdf_file, max_sdf_confs=1,
-        smina_args=smina_args, out_tsv=out_tsv)
+        smina_args=smina_args)
 
     return df_sm
 
@@ -83,7 +83,7 @@ def link_proteome_files(from_proteome_dir:str, to_inference_path:str, sdf_file:s
             Path(to_inference_path, dr, to_sdf_filename).as_posix()], check=True)
 
 
-def run_equibind(proteome_dir: str, sm_id: str, output_dir=None, out_smina_tsv=None,
+def run_equibind(proteome_dir: str, sm_id: str, output_dir=None,
         friendly_sm_id=None, friendly_proteome_id=None):
     """Run equibind against a proteome"""
     proteome_dir = Path(proteome_dir).resolve()
@@ -95,7 +95,7 @@ def run_equibind(proteome_dir: str, sm_id: str, output_dir=None, out_smina_tsv=N
         friendly_sm_id = sm_id.split("/")[-1].split('.')[0]
 
     if not friendly_proteome_id:
-        friendly_proteome_id = proteome_dir.stem
+        friendly_proteome_id = proteome_dir.stem[:-9] if proteome_dir.stem.endswith("_proteome") else proteome_dir.stem
 
     today = datetime.now().isoformat()[:10].replace("-","")
     if not output_dir:
@@ -115,7 +115,7 @@ def run_equibind(proteome_dir: str, sm_id: str, output_dir=None, out_smina_tsv=N
         sdf_file.write(sdf)
         sdf_file.flush()
 
-        config_file.write(EB_CONFIG_YAML.format(input_dir=input_dir, output_dir=output_dir))
+        config_file.write(EB_CONFIG_YAML.format(input_dir=input_dir, output_dir=output_dir.as_posix()))
         config_file.flush()
 
         # ------------------------------------------------------------------------------------------
@@ -145,7 +145,6 @@ def run_equibind(proteome_dir: str, sm_id: str, output_dir=None, out_smina_tsv=N
                 pjobs.append(dask.delayed(smina_score)(
                     pdb_file = pdb_file.as_posix(), #Path(proteome_dir, pid, pdb[0]),
                     sdf_file = Path(output_dir, pid, "lig_equibind_corrected.sdf").as_posix(),
-                    out_tsv = out_smina_tsv,
                     score_type = "minimize"
                     )
                 )

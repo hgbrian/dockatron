@@ -51,10 +51,11 @@ def smina_score(pdb_file: str, sdf_file: str, out_tsv:str = None, score_type="mi
     else:
         raise ValueError(f"score_type is {score_type}")
 
-    df_sm = smina_dock.dock(pdb_file, sdf_file, max_sdf_confs=4,
+    df_sm = smina_dock.dock(pdb_file, sdf_file, max_sdf_confs=1,
         smina_args=smina_args, out_tsv=out_tsv)
 
     return df_sm
+
 
 def link_proteome_files(from_proteome_dir:str, to_inference_path:str, sdf_file:str):
     """Copy (soft link) files to the directory structure EquiBind requires:
@@ -73,12 +74,13 @@ def link_proteome_files(from_proteome_dir:str, to_inference_path:str, sdf_file:s
     # copy pdb files (many to many)
     from_pdb_dirs = Path(from_proteome_dir).glob("*")
     for from_pdb_dir in tqdm(from_pdb_dirs, desc="Copying PDB files"):
-        subprocess.run(["cp", "-as", from_pdb_dir, to_inference_path], check=True)
+        subprocess.run(["cp", "-as", from_pdb_dir.as_posix(), to_inference_path.as_posix()], check=True)
 
     # copy sdf (ligand) file (one to many)
     to_sdf_dirs = Path(to_inference_path).glob("*")
     for dr in tqdm(to_sdf_dirs, desc="Copying SDF files"):
-        subprocess.run(["cp", "-as", from_sdf_path, Path(to_inference_path, dr, to_sdf_filename)], check=True)
+        subprocess.run(["cp", "-as", from_sdf_path.as_posix(),
+            Path(to_inference_path, dr, to_sdf_filename).as_posix()], check=True)
 
 
 def run_equibind(proteome_dir: str, sm_id: str, output_dir=None, out_smina_tsv=None,

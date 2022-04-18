@@ -18,6 +18,7 @@ import platform
 import sys
 
 from contextlib import contextmanager, redirect_stdout
+from datetime import datetime
 from multiprocessing import Process
 from pathlib import Path
 from tempfile import NamedTemporaryFile, mkdtemp, gettempdir
@@ -141,10 +142,12 @@ def using_directory(path: str):
 
 def dock_equibind(config_dict):
     """Code taken directly from EquiBind/inference.py __main__"""
-    # EquiBind expects a file, no matter what?
+
+    # EquiBind expects a file here, no matter what, so make one.
     placeholder_yml = Path(TMPDIR, "EquiBind_placeholder.yml")
     if not placeholder_yml.exists():
         placeholder_yml.touch()
+
     sys.argv.extend(["--config", placeholder_yml.as_posix()])
 
     # using_directory(EBHOME) maybe ??????
@@ -203,11 +206,10 @@ def gen_dock_equibind(inference_path:str, output_directory:str, timeout_s:int=10
         num_confs = 1
     )
 
-    total_pdbs = len(list(Path(inference_path).glob("*/*.pdb")))
-
     p = Process(target=dock_equibind, args=(config_dict,))
     p.start()
 
+    total_pdbs = len(list(Path(inference_path).glob("*/*.pdb")))
     sleep_s = 10
     for _ in range(timeout_s // sleep_s):
         num_done = len(list(Path(output_directory).glob("*/lig_equibind_corrected.sdf")))
@@ -216,9 +218,10 @@ def gen_dock_equibind(inference_path:str, output_directory:str, timeout_s:int=10
         if not p.is_alive():
             break
     else:
-        raise Exception(f"EquiBind failed to finish before {timeout_s}")
+        raise TimeoutError(f"EquiBind failed to finish before {timeout_s}")
 
     return
+
 
 def test_equibind_gen():
     """Run EquiBind in a Process to get progress"""
@@ -294,18 +297,39 @@ def gen_dock_smina(pdb_id:str, sm_id:str, out_tsv:str, exhaustiveness:int=DEFAUL
 def prep_equibind_dir(pdb_or_proteome_id:str, sm_id:str):
     """Place PDB and SDF files in a directory for EquiBind to process"""
 
+    # input directory to equibind
     inference_path = mkdtemp(prefix="equibind_")
+
     sdf_3d, sdf_from_smiles = smina_dock.sm_id_to_sdfs(sm_id)
     sdf = sdf_3d if sdf_3d is not None else sdf_from_smiles
 
-    with NamedTemporaryFile('w', suffix=".sdf", delete=False    ) as sdf_file:
+    with NamedTemporaryFile('w', suffix="_ligand.sdf", delete=False) as sdf_file:
         sdf_file.write(sdf)
         sdf_file.flush()
-        # either link from a pdb or a proteome
-        proteome_dir = pdb_or_proteome_id
-        print(proteome_dir, inference_path, sdf_file.name)
-        run_equibind.link_proteome_files(proteome_dir, inference_path, sdf_file.name)
-        print("Done linking!")
+
+    # either link from a pdb or a proteome
+    try:
+        pdb_str = smina_dock.download_pdb(pdb_or_proteome_id)
+        proteome_dir = None
+    except requests.exceptions.HTTPError:
+        if Path(proteome_dir).exists():
+            pdb_str = None
+            proteome_dir = pdb_or_proteome_id
+        else:
+            raise FileNotFoundError("no pdb url, pdb file or proteome directory found") from None
+
+    print(proteome_dir, inference_path, sdf_file.name)
+    if proteome_dir is None:
+        proteome_dir = mkdtemp(prefix="proteome_")
+        protein_dir = mkdtemp(dir=proteome_dir, prefix="protein_")
+
+        with NamedTemporaryFile('w', prefix=pdb_or_proteome_id, suffix="_protein.pdb", dir=protein_dir, delete=False) as pdb_file:
+            pdb_file.write(pdb_str)
+            pdb_file.flush()
+
+    print("ZZZ", pdb_file.name, proteome_dir, inference_path, sdf_file.name)
+    run_equibind.link_proteome_files(proteome_dir, inference_path, sdf_file.name)
+    print("Done linking!")
 
     return inference_path
 
@@ -314,17 +338,16 @@ def run_docking(pdb_id, sm_id, out_tsv, docking="smina"):
     if docking=="smina":
         yield from gen_dock_smina(pdb_id, sm_id, out_tsv=out_tsv)
     elif docking=="equibind":
-        inference_path = prep_equibind_dir("test_proteome", 123456)
-        from datetime import datetime
-        today = datetime.now().isoformat()[:10].replace("-","")
-        output_directory = Path(gettempdir(), f"{today}_test_proteome_123456")
+        inference_path = prep_equibind_dir(pdb_id, sm_id)
+        today = datetime.now().isoformat()[2:10].replace("-","")
+        output_directory = Path(gettempdir(), f"{today}_{pdb_id}_{sm_id}")
 
         yield from gen_dock_equibind(inference_path, output_directory.as_posix())
 
+# 6GRA fails
 gen_dock = run_docking("6GRA", 123456, "/tmp/6GRA_123456_temp.tsv", docking="equibind")
 for it in gen_dock:
     print("it", it)
-print(it)
 1/0
 
 # --------------------------------------------------------------------------------------------------

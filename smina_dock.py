@@ -92,11 +92,12 @@ def download_sdf(pubchem_id: str) -> Tuple[str, str]:
 
 def download_pdb(pdb_id: str) -> str:
     """Download pdb file as a string from rcsb.org"""
-    # url, file, or pdb_id allowed
+    # pdb file
     if pdb_id.endswith('.pdb'):
         with open(pdb_id) as f:
             return f.read()
 
+    # url or pdb_id
     if pdb_id.startswith('http'):
         url = pdb_id
         filename = url.split('/')[-1]

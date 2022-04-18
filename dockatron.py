@@ -132,16 +132,6 @@ def gen_dl(url, chunk_size=1_048_576, out_dir=None, out_file=None):
             out.write(data)
             yield
 
-@contextmanager
-def using_directory(path: str):
-    """use a working directory"""
-    origin = Path.cwd()
-    try:
-        os.chdir(path)
-        yield
-    finally:
-        os.chdir(origin)
-
 
 def dock_equibind(config_dict):
     """Code taken directly from EquiBind/inference.py __main__"""
@@ -153,7 +143,6 @@ def dock_equibind(config_dict):
 
     sys.argv.extend(["--config", placeholder_yml.as_posix()])
 
-    # using_directory(EB_HOME) maybe ??????
     with io.StringIO() as f: # redirecting stdout to f
         args = inference.parse_arguments()
 

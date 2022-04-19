@@ -19,7 +19,7 @@ import os
 import platform
 import sys
 
-from contextlib import contextmanager, redirect_stdout
+from contextlib import redirect_stdout
 from datetime import datetime
 from multiprocessing import Process
 from pathlib import Path
@@ -55,7 +55,6 @@ from textual.widget import Reactive, Widget
 from textual.widgets import Button, ButtonPressed, ScrollView, Static, TreeControl, TreeClick, TreeNode
 
 import smina_dock
-import run_equibind
 
 # Assume EquiBind is downloaded to a folder under dockatron
 EB_HOME = Path("./EquiBind").resolve().as_posix()
@@ -338,7 +337,7 @@ def prep_equibind_dir(pdb_or_proteome_id:str, sm_id:str):
             pdb_file.flush()
 
     print("ZZZ", pdb_file.name, proteome_dir, inference_path, sdf_file.name)
-    run_equibind.link_proteome_files(proteome_dir, inference_path, sdf_file.name)
+    smina_dock.link_proteome_files(proteome_dir, inference_path, sdf_file.name)
     print("Done linking!")
 
     return inference_path
@@ -360,8 +359,8 @@ def test_equibind_gen():
     """Run EquiBind in a Process to get progress"""
 
     gen_dock = gen_dock_equibind(
-        inference_path=f"{EB_HOME}/../mycophenolic_acid_test",
-        output_directory=f"{EB_HOME}/data/results/output/mycophenolic_acid_test"
+        inference_path=Path(EB_HOME, "..", "mycophenolic_acid_test").as_posix(),
+        output_directory=Path(gettempdir(), "mycophenolic_acid_test").as_posix()
     )
     inference_path, output_directory = next(gen_dock)
 
@@ -382,10 +381,8 @@ def test_equibind2():
 
     for it in gen_dock:
         print("it", it)
-    #df_res = smina_score_dirs(inference_path, output_directory)
-    print("done?", output_directory)
 
-test_equibind_gen()
+test_equibind2()
 1/0
 
 # --------------------------------------------------------------------------------------------------

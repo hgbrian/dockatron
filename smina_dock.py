@@ -25,14 +25,16 @@ import time
 import subprocess
 
 from os.path import join as pjoin
+from pathlib import Path
 from random import random
 from sys import platform
 from tempfile import NamedTemporaryFile, gettempdir
 from typing import Optional, Any, Tuple, List
 
-import requests
 import numpy as np
 import pandas as pd
+import requests
+from tqdm.auto import tqdm
 
 from Bio import PDB
 from scipy.spatial.distance import cdist
@@ -114,6 +116,32 @@ def get_or_download_pdb(pdb_id: str) -> str:
     pdb_req.raise_for_status()
     open(cache_path, 'w').write(pdb_req.text)
     return pdb_req.text
+
+
+def link_proteome_files(from_proteome_dir:str, to_inference_path:str, sdf_file:str):
+    """Copy (soft link) files to the directory structure EquiBind requires:
+    {inference_path}/{protein_names}/{pdb_id}_protein.pdb,{sdf_id}_ligand.sdf
+    """
+    # absolute path everything because of "cp -as" peculiarities
+    from_proteome_dir = Path(from_proteome_dir).resolve()
+    to_inference_path = Path(to_inference_path).resolve()
+    from_sdf_path = Path(sdf_file).resolve()
+
+    if from_sdf_path.name.endswith("_ligand.sdf"):
+        to_sdf_filename = from_sdf_path.name
+    else:
+        to_sdf_filename = from_sdf_path.stem + "_ligand.sdf"
+
+    # copy pdb files (many to many)
+    from_pdb_dirs = Path(from_proteome_dir).glob("*")
+    for from_pdb_dir in tqdm(from_pdb_dirs, desc="Copying PDB files"):
+        subprocess.run(["cp", "-as", from_pdb_dir.as_posix(), to_inference_path.as_posix()], check=True)
+
+    # copy sdf (ligand) file (one to many)
+    to_sdf_dirs = Path(to_inference_path).glob("*")
+    for dr in tqdm(to_sdf_dirs, desc="Copying SDF files"):
+        subprocess.run(["cp", "-as", from_sdf_path.as_posix(),
+            Path(to_inference_path, dr, to_sdf_filename).as_posix()], check=True)
 
 
 def run_smina(pdb: str,
@@ -298,10 +326,10 @@ def sm_id_to_sdfs(sm_id:str, max_sdf_confs:int=1, seed:int=1) -> tuple:
         sdf_from_smiles = rdconf(sm_smiles, maxconfs=max_sdf_confs, seed=seed)
 
         if len(sdf_from_smiles) == 0:
-            print(f"rdconf of sm_smiles {sm_id} {sm_smiles} failed")
+            sys.stderr.write(f"rdconf of sm_smiles {sm_id} {sm_smiles} failed\n")
             sdf_from_smiles = None
 
-        print(f"### SDF {sm_id}\t2d: {'success' if _unused_sdf_2d else 'failed'}\t3d: {'success' if sdf_3d else 'failed'}\n")
+        sys.stderr.write(f"### SDF {sm_id}\t2d: {'success' if _unused_sdf_2d else 'failed'}\t3d: {'success' if sdf_3d else 'failed'}\n")
 
     return sdf_3d, sdf_from_smiles
 
@@ -359,7 +387,6 @@ def dock(pdb_id:str,
     results = []
     for sdf_type, sdf in [("rdconf", sdf_from_smiles), ("3d", sdf_3d)]:
         if sdf is None:
-            sys.stderr.write(f"No sdf available for sdf type {sdf_type}\n")
             continue
 
         docked_sdfs = run_smina(pdb_or_qt, sdf, dock_bin=dock_bin, exhaustiveness=exhaustiveness,

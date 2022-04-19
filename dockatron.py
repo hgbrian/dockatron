@@ -343,15 +343,15 @@ def prep_equibind_dir(pdb_or_proteome_id:str, sm_id:str):
 
     return inference_path
 
-def run_docking(pdb_id:str, sm_id:Union[str, int], out_tsv:str,
+def run_docking(pdb_or_proteome_id:str, sm_id:Union[str, int], out_tsv:str,
         output_directory:Optional[str]=None, docking:str="smina"):
     """run docking with smina or equibind"""
     if docking=="smina":
-        yield from gen_dock_smina(pdb_id, sm_id, out_tsv=out_tsv)
+        yield from gen_dock_smina(pdb_or_proteome_id, sm_id, out_tsv=out_tsv)
     elif docking=="equibind":
-        inference_path = prep_equibind_dir(pdb_id, sm_id)
+        inference_path = prep_equibind_dir(pdb_or_proteome_id, sm_id)
         today = datetime.now().isoformat()[2:10].replace("-","")
-        output_directory = Path(gettempdir(), f"{today}_{pdb_id}_{sm_id}")
+        output_directory = Path(gettempdir(), f"{today}_{pdb_or_proteome_id}_{sm_id}")
         yield (inference_path, output_directory)
         yield from gen_dock_equibind(inference_path, output_directory)
 
@@ -365,10 +365,9 @@ def test_equibind_gen():
     )
     inference_path, output_directory = next(gen_dock)
 
-    for p in gen_dock:
-        print(p)
-    print("done?22", output_directory)
-
+    for it in gen_dock:
+        print(it)
+    
     raise SystemExit("finished testing equibind as a module")
 
 

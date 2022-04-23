@@ -20,7 +20,7 @@ import platform
 import sys
 import warnings
 
-from contextlib import redirect_stdout
+from contextlib import redirect_stdout, redirect_stderr
 from datetime import datetime
 from multiprocessing import Process
 from pathlib import Path
@@ -116,6 +116,7 @@ DEFAULT_NUM_WORKERS = int(max(1, round(multiprocessing.cpu_count() * .75)))
 
 # FIXFIX
 DEFAULT_MAX_SDF_CONFS = 10
+
 
 # --------------------------------------------------------------------------------------------------
 # Calling other libraries
@@ -330,7 +331,7 @@ def prep_equibind_dir(pdb_or_proteome_id:str, sm_id:str):
             raise FileNotFoundError("no pdb url, pdb file or proteome directory found") from None
 
     #
-    # If there is no proteome supplied, then create a single-protein "proteome" compatible with EquiBind
+    # If no proteome is supplied, then create a single-protein "proteome" compatible with EquiBind
     #
     if proteome_dir is None:
         pdb_id = pdb_or_proteome_id
@@ -346,6 +347,7 @@ def prep_equibind_dir(pdb_or_proteome_id:str, sm_id:str):
     print("Done linking!")
 
     return inference_path
+
 
 def run_docking(pdb_or_proteome_id:str, sm_id:Union[str, int], out_tsv:str,
         output_directory:Optional[str]=None, docking:str="smina"):
@@ -381,17 +383,17 @@ def test_equibind2():
     sm_id = 123456
     gen_dock = run_docking(pdb_id, sm_id, f"/tmp/{pdb_id}_{sm_id}_temp.tsv", docking="equibind")
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-
+    fio = io.StringIO()
+    with redirect_stderr(fio):
         inference_path, output_directory = next(gen_dock)
         print(inference_path, output_directory)
 
-        for it in gen_dock:
-            print("it", it)
+        for itr in gen_dock:
+            print("itr", itr)
+
+    raise SystemExit("finished testing equibind as a module")
 
 #test_equibind2()
-#1/0
 
 # --------------------------------------------------------------------------------------------------
 # Textual stuff

@@ -18,9 +18,9 @@ mamba install -c conda-forge openmm pdbfixer
 """
 
 import io
+import logging
 import os
 import re
-import sys
 import time
 import subprocess
 
@@ -29,7 +29,7 @@ from pathlib import Path
 from random import random
 from sys import platform
 from tempfile import NamedTemporaryFile, gettempdir
-from typing import Optional, Any, Tuple, List
+from typing import Optional, Any, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -39,7 +39,8 @@ from tqdm.auto import tqdm
 from Bio import PDB
 from scipy.spatial.distance import cdist
 
-from apps.docking.rdconf import rdconf
+from rdconf import rdconf
+
 
 SMINA = "smina"
 GNINA = "gnina"
@@ -48,7 +49,7 @@ DOCK_BIN_D = {SMINA: [pjoin(os.environ['HXROOT'], "apps", "docking", "bin", "smi
 OBABEL_BIN = pjoin(os.environ['HXROOT'], "apps", "docking", "bin", "babel" + ("_osx" if platform == "darwin" else ""))
 OBABEL_BIN = "obabel" # problematic binary
 
-DEBUG = True
+DEBUG = False
 DEFAULT_MAX_SDF_CONFS = 16
 DEFAULT_EXHAUSTIVENESS = 64
 DEFAULT_SDF_CONFS = 4
@@ -60,8 +61,11 @@ PDB_CACHE = os.path.join(TMPDIR, "apps_docking_pdb_cache")
 
 os.makedirs(PDB_CACHE, exist_ok=True)
 
+logging.basicConfig(level=logging.DEBUG if DEBUG else logging.WARNING)
+
 
 def flatten(alist: list) -> List[Any]:
+    """flatten a two-level list"""
     return [item for sublist in alist for item in sublist]
 
 
@@ -326,10 +330,10 @@ def sm_id_to_sdfs(sm_id:str, max_sdf_confs:int=1, seed:int=1) -> tuple:
         sdf_from_smiles = rdconf(sm_smiles, maxconfs=max_sdf_confs, seed=seed)
 
         if len(sdf_from_smiles) == 0:
-            sys.stderr.write(f"rdconf of sm_smiles {sm_id} {sm_smiles} failed\n")
+            logging.debug(f"rdconf of sm_smiles {sm_id} {sm_smiles} failed\n")
             sdf_from_smiles = None
 
-        sys.stderr.write(f"### SDF {sm_id}\t2d: {'success' if _unused_sdf_2d else 'failed'}\t3d: {'success' if sdf_3d else 'failed'}\n")
+        logging.debug(f"SDF {sm_id}\t2d: {'success' if _unused_sdf_2d else 'failed'}\t3d: {'success' if sdf_3d else 'failed'}\n")
 
     return sdf_3d, sdf_from_smiles
 
@@ -372,9 +376,9 @@ def dock(pdb_id:str,
     pdb_no_hets = "\n".join(line for line in pdb.splitlines() if not line.startswith("HETATM"))
     pdb_hets_coords = pdb_to_coords(pdb_hets) if pdb_hets else []
 
-    #print(f"Remove hetatms for {pdb_id}\n"
-    #      f"lines without HETATMS:   {len([l for l in pdb_no_hets.splitlines() if not l.startswith('REMARK')])}\n"
-    #      f"lines with only HETATMS: {len([l for l in pdb_hets.splitlines() if not l.startswith('REMARK')])}")
+    logging.debug(f"Remove hetatms for {pdb_id}")
+    logging.debug(f"lines without HETATMS:   {len([l for l in pdb_no_hets.splitlines() if not l.startswith('REMARK')])}")
+    logging.debug(f"lines with only HETATMS: {len([l for l in pdb_hets.splitlines() if not l.startswith('REMARK')])}")
 
     pdb_parser = PDB.PDBParser()
     if is_pdb_no_hetatm is True:
@@ -394,8 +398,8 @@ def dock(pdb_id:str,
             autobox_ligand=autobox_ligand, smina_args=smina_args, progress_log=progress_log)
 
         for n, docked_sdf in enumerate([ds for ds in docked_sdfs.split('$$$$\n') if ds.strip()]):
-            #if n < 3:
-            #    sys.stderr.write(f"{n+1: 2d}:nearest {pdb_id} {sm_id} {get_nearest_res(docked_sdf, pdb_obj)}\n")
+            if n < 3:
+                logging.debug(f"{n+1: 2d}:nearest {pdb_id} {sm_id} {get_nearest_res(docked_sdf, pdb_obj)}\n")
 
             sdf_coords, scores_d = sdf_to_coords_scores(docked_sdf)
             assert "minimizedAffinity" in scores_d, f"no minimizedAffinity found in {scores_d}"
@@ -485,8 +489,6 @@ def dock_all_by_all(pdb_ids_dict:dict,
         .assign(sm_name=lambda df: df['sm_id'].apply(sm_names.get),
                 pdb_name=lambda df: df['pdb_id'].apply(pdb_names.get))
         .sort_values('minimizedAffinity'))
-
-    print("df:", df_res.head(1))
 
     #
     # Combine all docking results from all time

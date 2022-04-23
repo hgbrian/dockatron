@@ -18,7 +18,6 @@ import multiprocessing
 import os
 import platform
 import sys
-import warnings
 
 from contextlib import redirect_stdout, redirect_stderr
 from datetime import datetime
@@ -311,9 +310,10 @@ def prep_equibind_dir(pdb_or_proteome_id:str, sm_id:str):
     """Place PDB and SDF files in a directory for EquiBind to process"""
     # input directory to equibind
     inference_path = mkdtemp(prefix="inference_")
-
-    sdf_3d, sdf_from_smiles = smina_dock.sm_id_to_sdfs(sm_id)
+    sdf_3d, sdf_from_smiles = smina_dock.sm_id_to_sdfs(sm_id, max_sdf_confs=DEFAULT_MAX_SDF_CONFS)
     sdf = sdf_3d if sdf_3d is not None else sdf_from_smiles
+    if sdf is None:
+        return None
 
     with NamedTemporaryFile('w', suffix="_ligand.sdf", delete=False) as sdf_file:
         sdf_file.write(sdf)
@@ -342,7 +342,6 @@ def prep_equibind_dir(pdb_or_proteome_id:str, sm_id:str):
             pdb_file.write(pdb_str)
             pdb_file.flush()
 
-    print("ZZZ", pdb_file.name, proteome_dir, inference_path, sdf_file.name)
     smina_dock.link_proteome_files(proteome_dir, inference_path, sdf_file.name)
     print("Done linking!")
 
@@ -356,6 +355,9 @@ def run_docking(pdb_or_proteome_id:str, sm_id:Union[str, int], out_tsv:str,
         yield from gen_dock_smina(pdb_or_proteome_id, sm_id, out_tsv=out_tsv)
     elif docking=="equibind":
         inference_path = prep_equibind_dir(pdb_or_proteome_id, sm_id)
+        if inference_path is None:
+            yield (None, None)
+
         today = datetime.now().isoformat()[2:10].replace("-","")
         output_directory = Path(gettempdir(), f"{today}_{pdb_or_proteome_id}_{sm_id}")
         yield (inference_path, output_directory)
@@ -383,8 +385,8 @@ def test_equibind2():
     sm_id = 123456
     gen_dock = run_docking(pdb_id, sm_id, f"/tmp/{pdb_id}_{sm_id}_temp.tsv", docking="equibind")
 
-    fio = io.StringIO()
-    with redirect_stderr(fio):
+    fout, ferr = io.StringIO(), io.StringIO()
+    with redirect_stdout(fout), redirect_stderr(ferr):
         inference_path, output_directory = next(gen_dock)
         print(inference_path, output_directory)
 
@@ -533,7 +535,8 @@ class GridButton(Button):
         log(f"XXX Button on_click {self}")
 
     async def on_mouse_move(self, event: events.MouseMove) -> None:
-        log(f"XXX Button move {self}")
+        """fires if you hover over the button"""
+        pass
 
     #    #self.has_focus = True
     #    self.start_docking()
@@ -629,17 +632,25 @@ class GridTest(App):
             out_tsv = Path(OUTDIR, f"{self._get_friendly_id()}.tsv")
 
             # docking must be wrapped like this because e.g., the PDB parser emits warnings
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
+            fout, ferr = io.StringIO(), io.StringIO()
+            with redirect_stdout(fout), redirect_stderr(ferr):
 
                 log("Run docking")
                 dk_gener = run_docking(pr_id, sm_id, out_tsv, docking="equibind")
+
                 inference_path, output_directory = next(dk_gener)
+
+                if inference_path is None or output_directory is None:
+                    self.output_md.extend(["Something went wrong! No ligand or PDB with this ID found"])
+                    message_sender.label = "Start docking"
+                    message_sender.button_style = "white on blue"
+                    await self._update_output()
+                    return
 
                 # ---------------------------------------------------------------
                 # Progress bar for docking -- max_sdf_confs is not known though?
                 #
-                dk_task = self.progress_bar.add_task("[red]smina:", total = self.max_sdf_confs + 1)
+                dk_task = self.progress_bar.add_task(f"[red]equibind_{sm_id}:", total = self.max_sdf_confs + 1)
 
                 self.progress_bar.update(dk_task, advance=0)
                 self.progress_panel.refresh()
@@ -655,6 +666,11 @@ class GridTest(App):
 
                     if isinstance(l, str):
                         err.append(l)
+
+                if False:
+                    self.progress_bar.update(dk_task, visible=False)
+                    self.progress_panel.refresh()
+                    self.refresh()
 
             message_sender.label = "Start docking"
             message_sender.button_style = "white on blue"
@@ -769,11 +785,6 @@ class GridTest(App):
 
     async def _change_focus(self) -> None:
         for child in self.children:
-            try:
-                log("grandchildren found", child.children)
-            except Exception as err:
-                log(f"{err}")
-
             if hasattr(child, "row") and hasattr(child, "cols"):
                 if child.row == self.row and self.col in child.cols:
                     await self.set_focus(child)

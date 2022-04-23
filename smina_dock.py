@@ -69,7 +69,7 @@ def flatten(alist: list) -> List[Any]:
     return [item for sublist in alist for item in sublist]
 
 
-def download_smiles(pubchem_id: str, retries:int = 5) -> str:
+def download_smiles(pubchem_id: str, retries:int = 2) -> str:
     """Given a pubchem id, get a smiles string"""
     while True:
         req = requests.get(f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/CID/{pubchem_id}/property/CanonicalSMILES/CSV")
@@ -77,8 +77,8 @@ def download_smiles(pubchem_id: str, retries:int = 5) -> str:
         if smiles_url_csv is not None:
             break
         if retries == 0:
-            break
-        time.sleep(5*random())
+            return None
+        time.sleep(1+random())
         retries -= 1
 
     return smiles_url_csv.splitlines()[1].split(',')[1].strip('"').strip("'") if smiles_url_csv is not None else None
@@ -327,10 +327,13 @@ def sm_id_to_sdfs(sm_id:str, max_sdf_confs:int=1, seed:int=1) -> tuple:
             sm_smiles = sm_id
             _unused_sdf_2d, sdf_3d = None, None
 
-        sdf_from_smiles = rdconf(sm_smiles, maxconfs=max_sdf_confs, seed=seed)
+        if sm_smiles is None:
+            sdf_from_smiles = None
+        else:
+            sdf_from_smiles = rdconf(sm_smiles, maxconfs=max_sdf_confs, seed=seed)
 
-        if len(sdf_from_smiles) == 0:
-            logging.debug(f"rdconf of sm_smiles {sm_id} {sm_smiles} failed\n")
+        if sdf_from_smiles is None or len(sdf_from_smiles) == 0:
+            logging.debug(f"rdconf of sm_smiles {sm_id} {sm_smiles} failed 2\n")
             sdf_from_smiles = None
 
         logging.debug(f"SDF {sm_id}\t2d: {'success' if _unused_sdf_2d else 'failed'}\t3d: {'success' if sdf_3d else 'failed'}\n")

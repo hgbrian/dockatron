@@ -324,11 +324,12 @@ def prep_equibind_dir(pdb_or_proteome_id:str, sm_id:str):
         pdb_str = smina_dock.fix_pdb(smina_dock.get_or_download_pdb(pdb_or_proteome_id))
         proteome_dir = None
     except requests.exceptions.HTTPError:
-        if Path(proteome_dir).exists():
+        if Path(pdb_or_proteome_id).exists():
             pdb_str = None
             proteome_dir = pdb_or_proteome_id
         else:
-            raise FileNotFoundError("no pdb url, pdb file or proteome directory found") from None
+            log("FileNotFoundError(no pdb url, pdb file or proteome directory found)")
+            return None
 
     #
     # If no proteome is supplied, then create a single-protein "proteome" compatible with EquiBind

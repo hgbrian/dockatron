@@ -6,11 +6,132 @@ import sys
 import tempfile
 from rdkit.Chem import AllChem as Chem
 from optparse import OptionParser
+from pathlib import Path
 
 
 def getRMS(mol, c1, c2):
     rms, _trans = Chem.GetAlignmentTransform(mol, mol, c1, c2)
     return rms
+
+
+def rdconf2(smifile_str,
+    maxconfs=25, sample_multiplier=1, seed=9162006,
+    rms_threshold=0, energy_window=-1, is_verbose=False,
+    is_mmff=False, is_nomin=False, is_etkdg=False):
+
+    output_fh = tempfile.NamedTemporaryFile(delete=False)
+
+    #input = args[0]
+    #output = args[1]
+
+    _x = '''skip
+    smifile = open(input)
+    if options.verbose:
+        print("Generating a maximum of",options.maxconfs,"per a mol")
+
+    if options.etkdg and not Chem.ETKDG:
+        print("ETKDB does not appear to be implemented.  Please upgrade RDKit.")
+        sys.exit(1)
+
+    split = os.path.splitext(output)
+    if split[1] == '.gz':
+        outf=gzip.open(output,'wt+')
+        output = split[0] #strip .gz
+    else:
+        outf = open(output,'w+')
+    '''
+
+    sdwriter = Chem.SDWriter(output_fh.name)
+
+    if sdwriter is None:
+        print("Could not open ".output)
+        sys.exit(-1)
+
+    for line in smifile_str.splitlines():
+        toks = line.split()
+        smi = toks[0]
+        name = ' '.join(toks[1:])
+
+        pieces = smi.split('.')
+        if len(pieces) > 1:
+            smi = max(pieces, key=len) #take largest component by length
+            print("Taking largest component: %s\t%s" % (smi,name))
+
+        mol = Chem.MolFromSmiles(smi)
+        if mol is not None:
+            if is_verbose:
+                print(smi)
+            try:
+                Chem.SanitizeMol(mol)
+                mol = Chem.AddHs(mol)
+                mol.SetProp("_Name", name)
+
+                if is_etkdg:
+                    cids = Chem.EmbedMultipleConfs(mol, int(sample_multiplier*maxconfs), Chem.ETKDG())
+                else:
+                    cids = Chem.EmbedMultipleConfs(mol, int(sample_multiplier*maxconfs),randomSeed=seed)
+                if is_verbose:
+                    print(len(cids),"conformers found")
+
+                cenergy = []
+                for conf in cids:
+                    #not passing confID only minimizes the first conformer
+                    if is_nomin:
+                        cenergy.append(conf)
+                    elif is_mmff:
+                        converged = Chem.MMFFOptimizeMolecule(mol, confId=conf)
+                        mp = Chem.MMFFGetMoleculeProperties(mol)
+                        cenergy.append(Chem.MMFFGetMoleculeForceField(mol, mp, confId=conf).CalcEnergy())
+                    else:
+                        converged = not Chem.UFFOptimizeMolecule(mol, confId=conf)
+                        cenergy.append(Chem.UFFGetMoleculeForceField(mol, confId=conf).CalcEnergy())
+                    if is_verbose:
+                        print("Convergence of conformer",conf,converged)
+
+                # oh!
+                mol = Chem.RemoveHs(mol)
+                sortedcids = sorted(cids, key = lambda cid: cenergy[cid])
+                if len(sortedcids) > 0:
+                    mine = cenergy[sortedcids[0]]
+                else:
+                    mine = 0
+                if(rms_threshold == 0):
+                    cnt = 0;
+                    for conf in sortedcids:
+                        if(cnt >= maxconfs):
+                            break
+                        if(energy_window < 0) or cenergy[conf]-mine <= energy_window:
+                            sdwriter.write(mol,conf)
+                            cnt+=1
+                else:
+                    written = {}
+                    for conf in sortedcids:
+                        if len(written) >= maxconfs:
+                            break
+                        #check rmsd
+                        passed = True
+                        for seenconf in written.keys():
+                            rms = getRMS(mol,seenconf,conf)
+                            if(rms < rms_threshold) or (energy_window > 0 and cenergy[conf]-mine > energy_window):
+                                passed = False
+                                break
+                        if(passed):
+                            written[conf] = True
+                            sdwriter.write(mol,conf)
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception as e:
+                print("Exception",e)
+        else:
+            print("ERROR:",smi)
+
+    #sdwriter.close()
+    #outf.close()
+
+    output_fh.flush()
+    output_fh.seek(0)
+    # return output_fh.read()
+    return Path(output_fh.name).read_text()
 
 
 def rdconf(smifile_str,
@@ -37,7 +158,7 @@ def rdconf(smifile_str,
 
             try:
                 Chem.SanitizeMol(mol)
-                mol = Chem.AddHs(mol) # added Brian 2022-04-13
+                #mol = Chem.AddHs(mol) # added Brian 2022-04-13
                 mol.SetProp("_Name", name)
                 cids = Chem.EmbedMultipleConfs(mol, int(sample_multiplier*maxconfs), randomSeed=seed)
 
@@ -90,7 +211,6 @@ def rdconf(smifile_str,
     output_fh.flush()
     output_fh.seek(0)
     # return output_fh.read()
-    from pathlib import Path
     return Path(output_fh.name).read_text()
 
 
@@ -108,6 +228,14 @@ if __name__ == "__main__":
                       help="filter based on energy difference with lowest energy conformer", default="-1", type="float", metavar="E")
     parser.add_option("-v", "--verbose", dest="is_verbose", action="store_true", default=False,
                       help="verbose output")
+    # 3 new options
+    parser.add_option("--mmff", dest="mmff",action="store_true",default=False,
+                    help="use MMFF forcefield instead of UFF")
+    parser.add_option("--nomin", dest="nomin",action="store_true",default=False,
+                    help="don't perform energy minimization (bad idea)")
+    parser.add_option("--etkdg", dest="etkdg",action="store_true",default=False,
+                    help="use new ETKDG knowledge-based method instead of distance geometry")
+
 
     (options, args) = parser.parse_args()
 
@@ -124,9 +252,10 @@ if __name__ == "__main__":
     if options.is_verbose:
         print(f"Generating a maximum of {options.maxconfs} per a mol")
 
-    sdfs = rdconf(smifile_str, maxconfs=options.maxconfs, sample_multiplier=options.sample, 
+    sdfs = rdconf2(smifile_str, maxconfs=options.maxconfs, sample_multiplier=options.sample,
                   seed=options.seed, rms_threshold=options.rms,
-                  energy_window=options.energy, is_verbose=options.is_verbose)
+                  energy_window=options.energy, is_verbose=options.is_verbose,
+                  is_mmff=options.mmff, is_nomin=options.nomin, is_etkdg=options.etkdg)
 
     with open(output_filename, 'w') as out:
         out.write(sdfs)

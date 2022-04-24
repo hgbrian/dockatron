@@ -189,8 +189,11 @@ def dock_equibind(config_dict):
         return
 
 
-def gen_dock_equibind(inference_path:str, output_directory:str, timeout_s:int=100_000):
+def gen_dock_equibind(inference_path:str, output_directory:str, out_tsv:str=None, timeout_s:int=100_000):
     """Run EquiBind in a Process to get progress"""
+
+    if out_tsv is None:
+        out_tsv = Path(output_directory, f"{Path(output_directory).name}.tsv").as_posix()
 
     # config_dict comes straight from the default EquiBind yaml
     config_dict = dict(
@@ -254,7 +257,8 @@ def gen_dock_equibind(inference_path:str, output_directory:str, timeout_s:int=10
       .assign(dock_bin = "EquiBind + smina")
       .sort_values("minimizedAffinity")
     )
-    df_out.to_csv(Path(output_directory, f"{Path(output_directory).name}.tsv"), sep='\t', index=None)
+
+    df_out.to_csv(out_tsv, sep='\t', index=None)
     print("done EB", Path(output_directory, f"{Path(output_directory).name}.tsv"))
     return
 
@@ -362,7 +366,7 @@ def run_docking(pdb_or_proteome_id:str, sm_id:Union[str, int], out_tsv:str,
         today = datetime.now().isoformat()[2:10].replace("-","")
         output_directory = Path(gettempdir(), f"{today}_{pdb_or_proteome_id}_{sm_id}")
         yield (inference_path, output_directory)
-        yield from gen_dock_equibind(inference_path, output_directory)
+        yield from gen_dock_equibind(inference_path, output_directory, out_tsv=out_tsv)
 
 
 def test_equibind_gen():

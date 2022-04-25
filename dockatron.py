@@ -65,7 +65,6 @@ import smina_dock
 EB_HOME = Path("./EquiBind").resolve().as_posix()
 EB_SDF_NAME = "lig_equibind_corrected.sdf"
 sys.path.insert(1, EB_HOME)
-
 from EquiBind import inference
 
 # --------------------------------------------------------------------------------------------------
@@ -113,7 +112,7 @@ DEFAULT_MAX_SDF_CONFS = 1 if DEBUG else 4
 DEFAULT_EXHAUSTIVENESS = 1 if DEBUG else 8
 DEFAULT_NUM_WORKERS = int(max(1, round(multiprocessing.cpu_count() * .75)))
 
-# FIXFIX
+# FIXFIX should be one?
 DEFAULT_MAX_SDF_CONFS = 10
 
 
@@ -415,6 +414,7 @@ def test_equibind2():
 
     raise SystemExit("finished testing equibind as a module")
 
+# DEBUG stuff
 #def log(*args, **kwargs): return print(*args, **kwargs)
 #test_equibind2()
 
@@ -424,7 +424,7 @@ def test_equibind2():
 
 @rich.repr.auto(angular=False)
 class TextInputPanel(Widget, can_focus=True):
-
+    """Text Box"""
     has_focus: Reactive[bool] = Reactive(False)
     mouse_over: Reactive[bool] = Reactive(False)
     keypress: Reactive[str] = Reactive("")
@@ -475,7 +475,7 @@ class TextInputPanel(Widget, can_focus=True):
 
 @rich.repr.auto(angular=False)
 class TextPanel(Widget, can_focus=True):
-
+    """Text box for proteome"""
     has_focus: Reactive[bool] = Reactive(False)
     mouse_over: Reactive[bool] = Reactive(False)
     keypress: Reactive[str] = Reactive("")
@@ -515,15 +515,6 @@ class TextPanel(Widget, can_focus=True):
 
     async def on_click(self, event: events.Click):
         await self.emit(ButtonPressed(self))
-
-# @rich.repr.auto(angular=False)
-# class GridScrollView(ScrollView):
-#     def __init__(self, *, name: str = None, val:str = "", row:int = None, cols:List = None) -> None:
-#         super().__init__(name=name)
-#         self.name = name
-#         self.row = row
-#         self.cols = cols
-#         self.update(Markdown('\n\n'.join("self.output_md"), hyperlinks=True))
 
 
 @rich.repr.auto(angular=False)

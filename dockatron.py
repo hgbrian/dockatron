@@ -669,10 +669,10 @@ class GridTest(App):
                 # Progress bar for docking -- max_sdf_confs is not known though?
                 #
                 if len(self.progress_bar.task_ids) == 0:
-                    dk_task_id = self.progress_bar.add_task(f"[red]equibind_{self._get_friendly_id()}:", total = self.max_sdf_confs + 1)
-                    assert dk_task_id == 0, "only progress bar allowed!"
+                    dk_task_id = self.progress_bar.add_task(f"[red]{self._get_friendly_id()}:", total = self.max_sdf_confs + 1)
+                    assert dk_task_id == 0, "only one progress bar allowed!"
                 else:
-                    self.progress_bar.update(0, description=f"[red]equibind_{self._get_friendly_id()}:")
+                    self.progress_bar.update(0, description=f"[red]{self._get_friendly_id()}:")
                     self.progress_bar.reset(0, total = self.max_sdf_confs + 1)
 
                 self.progress_bar.update(0, advance=0)
@@ -681,7 +681,7 @@ class GridTest(App):
 
                 err = [] # keep track of errors returned on running docking
                 for p_info in iter(dk_gener):
-                    # TODO update to l[0] / l[1]
+                    # TODO update to take advantage of p_info = (done, total)
                     self.progress_bar.update(0, advance=1)
                     # Both refreshes are necessary?
                     self.progress_panel.refresh()

@@ -121,6 +121,15 @@ DEFAULT_MAX_SDF_CONFS = 10
 # Calling other libraries
 #
 
+def with_logging(fn):
+    """log decorator"""
+    def wrap(*args, **kwargs):
+        log("Executing", fn.__name__, args, kwargs)
+        return fn(*args, **kwargs)
+    return wrap
+
+
+@with_logging
 def gen_dl(url, chunk_size=1_048_576, out_dir=None, out_file=None):
     """Generator for downloading files that lets me show progress."""
     if out_dir is not None:
@@ -139,6 +148,7 @@ def gen_dl(url, chunk_size=1_048_576, out_dir=None, out_file=None):
             yield
 
 
+@with_logging
 def dock_equibind(config_dict):
     """Code taken directly from EquiBind/inference.py __main__"""
 
@@ -189,6 +199,7 @@ def dock_equibind(config_dict):
         return
 
 
+@with_logging
 def gen_dock_equibind(inference_path:str, output_directory:str, out_tsv:str=None, timeout_s:int=100_000):
     """Run EquiBind in a Process to get progress"""
 
@@ -259,10 +270,11 @@ def gen_dock_equibind(inference_path:str, output_directory:str, out_tsv:str=None
     )
 
     df_out.to_csv(out_tsv, sep='\t', index=None)
-    print("done EB", Path(output_directory, f"{Path(output_directory).name}.tsv"))
+    log("done EB", Path(output_directory, f"{Path(output_directory).name}.tsv"))
     return
 
 
+@with_logging
 def _smina_score_one(pdb_file: str, sdf_file: str, score_type:str="minimize") -> pd.DataFrame:
     """Use smina to score a docked position"""
     if score_type == "minimize":
@@ -277,6 +289,7 @@ def _smina_score_one(pdb_file: str, sdf_file: str, score_type:str="minimize") ->
     return df_sm
 
 
+@with_logging
 def gen_dock_smina(pdb_id:str, sm_id:str, out_tsv:str, exhaustiveness:int=DEFAULT_EXHAUSTIVENESS,
         max_sdf_confs:int=DEFAULT_MAX_SDF_CONFS, timeout_s:int=100_000):
     """Run smina in a Process to get progress"""
@@ -310,10 +323,12 @@ def gen_dock_smina(pdb_id:str, sm_id:str, out_tsv:str, exhaustiveness:int=DEFAUL
     return
 
 
+@with_logging
 def prep_equibind_dir(pdb_or_proteome_id:str, sm_id:str):
     """Place PDB and SDF files in a directory for EquiBind to process"""
     # input directory to equibind
     inference_path = mkdtemp(prefix="inference_")
+
     sdf_3d, sdf_from_smiles = smina_dock.sm_id_to_sdfs(sm_id, max_sdf_confs=DEFAULT_MAX_SDF_CONFS)
     sdf = sdf_3d if sdf_3d is not None else sdf_from_smiles
     if sdf is None:
@@ -348,11 +363,11 @@ def prep_equibind_dir(pdb_or_proteome_id:str, sm_id:str):
             pdb_file.flush()
 
     smina_dock.link_proteome_files(proteome_dir, inference_path, sdf_file.name)
-    print("Done linking!")
 
     return inference_path
 
 
+@with_logging
 def run_docking(pdb_or_proteome_id:str, sm_id:Union[str, int], out_tsv:str,
         output_directory:Optional[str]=None, docking:str="smina"):
     """run docking with smina or equibind"""
@@ -364,7 +379,7 @@ def run_docking(pdb_or_proteome_id:str, sm_id:Union[str, int], out_tsv:str,
             yield (None, None)
 
         today = datetime.now().isoformat()[2:10].replace("-","")
-        output_directory = Path(gettempdir(), f"{today}_{pdb_or_proteome_id}_{sm_id}")
+        output_directory = Path(gettempdir(), f"{today}_{pdb_or_proteome_id}_{sm_id}").as_posix()
         yield (inference_path, output_directory)
         yield from gen_dock_equibind(inference_path, output_directory, out_tsv=out_tsv)
 
@@ -378,28 +393,29 @@ def test_equibind_gen():
     )
     inference_path, output_directory = next(gen_dock)
 
-    for it in gen_dock:
-        log("it", it)
+    for itr in gen_dock:
+        log("itr", itr)
     
     raise SystemExit("finished testing equibind as a module")
 
 
 def test_equibind2():
     """Test EquiBind"""
-    pdb_id = "6GRI"
-    sm_id = 123456
-    gen_dock = run_docking(pdb_id, sm_id, f"/tmp/{pdb_id}_{sm_id}_temp.tsv", docking="equibind")
+    pdb_id = "6GRA"
+    sm_id = 123322
 
+
+    gen_dock = run_docking(pdb_id, sm_id, f"/tmp/{pdb_id}_{sm_id}_temp.tsv", docking="equibind")
     fout, ferr = io.StringIO(), io.StringIO()
     with redirect_stdout(fout), redirect_stderr(ferr):
         inference_path, output_directory = next(gen_dock)
-        print(inference_path, output_directory)
 
         for itr in gen_dock:
-            print("itr", itr)
+            log("itr", itr)
 
     raise SystemExit("finished testing equibind as a module")
 
+#def log(*args, **kwargs): return print(*args, **kwargs)
 #test_equibind2()
 
 # --------------------------------------------------------------------------------------------------
@@ -415,10 +431,10 @@ class TextInputPanel(Widget, can_focus=True):
     style: Reactive[str] = Reactive("")
     height: Reactive[int] = Reactive(None)
 
-    def __init__(self, *, name: str = None, height: int = None, val:str = '', row:int = None, cols:List = None) -> None:
+    def __init__(self, *, name: str = None, height: int = None, val:str = '', row:int = None, default_text:str = None, cols:List = None) -> None:
         super().__init__(name=name)
         self.height = height
-        self.text = ""
+        self.text = default_text or "" # FIXFIX temporary for testing
         self.title = name
         self.val = val
         self.row = row
@@ -573,8 +589,7 @@ class GridTest(App):
         self.max_sdf_confs = DEFAULT_MAX_SDF_CONFS
 
         has_cuda = torch.cuda.is_available()
-        self.output_md = [f"# Dockatron Output\nGPU?: {has_cuda}"]
-
+        self.output_md = [f"# Dockatron Output\nGPU found?: {'Yes' if has_cuda else 'No'}"]
 
     async def on_load(self) -> None:
         """Bind keys here."""
@@ -634,13 +649,11 @@ class GridTest(App):
 
             pr_id = self.vals.get('pdb_id') or self.vals.get('gene_name') or self.vals.get('proteome')
             sm_id = self.vals.get('pubchem_id') or self.vals.get('sdf') or self.vals.get('smiles')
-            out_tsv = Path(OUTDIR, f"{self._get_friendly_id()}.tsv")
+            out_tsv = Path(OUTDIR, f"{self._get_friendly_id()}.tsv").as_posix()
 
             # docking must be wrapped like this because e.g., the PDB parser emits warnings
             fout, ferr = io.StringIO(), io.StringIO()
             with redirect_stdout(fout), redirect_stderr(ferr):
-
-                log("Run docking")
                 dk_gener = run_docking(pr_id, sm_id, out_tsv, docking="equibind")
 
                 inference_path, output_directory = next(dk_gener)
@@ -655,27 +668,32 @@ class GridTest(App):
                 # ---------------------------------------------------------------
                 # Progress bar for docking -- max_sdf_confs is not known though?
                 #
-                dk_task = self.progress_bar.add_task(f"[red]equibind_{sm_id}:", total = self.max_sdf_confs + 1)
+                if len(self.progress_bar.task_ids) == 0:
+                    dk_task_id = self.progress_bar.add_task(f"[red]equibind_{self._get_friendly_id()}:", total = self.max_sdf_confs + 1)
+                    assert dk_task_id == 0, "only progress bar allowed!"
+                else:
+                    self.progress_bar.update(0, description=f"[red]equibind_{self._get_friendly_id()}:")
+                    self.progress_bar.reset(0, total = self.max_sdf_confs + 1)
 
-                self.progress_bar.update(dk_task, advance=0)
+                self.progress_bar.update(0, advance=0)
                 self.progress_panel.refresh()
                 self.refresh()
 
-                err = [] # keep track of errors returned on running smina
-                for l in iter(dk_gener):
+                err = [] # keep track of errors returned on running docking
+                for p_info in iter(dk_gener):
                     # TODO update to l[0] / l[1]
-                    self.progress_bar.update(dk_task, advance=1)
+                    self.progress_bar.update(0, advance=1)
                     # Both refreshes are necessary?
                     self.progress_panel.refresh()
                     self.refresh()
 
-                    if isinstance(l, str):
-                        err.append(l)
+                    if isinstance(p_info, str):
+                        err.append(p_info)
 
-                if False:
-                    self.progress_bar.update(dk_task, visible=False)
-                    self.progress_panel.refresh()
-                    self.refresh()
+                # Finished, so set to 100%
+                self.progress_bar.update(0, advance=self.progress_bar.tasks[0].remaining)
+                self.progress_panel.refresh()
+                self.refresh()
 
             message_sender.label = "Start docking"
             message_sender.button_style = "white on blue"
@@ -907,10 +925,10 @@ class GridTest(App):
             dl_smina=GridButton(name="Download smina", label=smina_label, row=1, cols=[2]),
             dl_proteome=GridButton(name="Download proteome", label="Download proteome", row=1, cols=[3]),
             # text
-            enter_pdb=TextInputPanel(name="PDB", val="pdb_id", row=2, cols=[1]),
+            enter_pdb=TextInputPanel(name="PDB", val="pdb_id", default_text = "6GRAx", row=2, cols=[1]),
             enter_gene_name=TextInputPanel(name="Gene name", val="gene_name", row=2, cols=[2]),
             enter_proteome=TextPanel(name="Proteome", val="proteome", row=2, cols=[3]),
-            enter_pubchem=TextInputPanel(name="PubChem ID", val="pubchem_id", row=3, cols=[1]),
+            enter_pubchem=TextInputPanel(name="PubChem ID", val="pubchem_id", default_text = "123321x", row=3, cols=[1]),
             enter_smiles=TextInputPanel(name="SMILES", val="smiles", row=3, cols=[2]),
             enter_sdf=TextInputPanel(name="SDF", val="sdf", row=3, cols=[3]),
             start_docking=GridButton(name="Start docking", label="Start docking", row=4, cols=[1,2,3]),

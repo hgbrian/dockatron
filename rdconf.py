@@ -9,6 +9,9 @@ from pathlib import Path
 
 from rdkit.Chem import AllChem as Chem
 
+# silence C++ output https://github.com/rdkit/rdkit/issues/2683
+from rdkit import RDLogger
+RDLogger.DisableLog('rdApp.*')
 
 def getRMS(mol, c1, c2):
     rms, _trans = Chem.GetAlignmentTransform(mol, mol, c1, c2)

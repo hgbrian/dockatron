@@ -401,8 +401,7 @@ def test_equibind_gen():
 def test_equibind2():
     """Test EquiBind"""
     pdb_id = "6GRA"
-    sm_id = 123322
-
+    sm_id = 123320 # 123322 does not exist
 
     gen_dock = run_docking(pdb_id, sm_id, f"/tmp/{pdb_id}_{sm_id}_temp.tsv", docking="equibind")
     fout, ferr = io.StringIO(), io.StringIO()
@@ -431,7 +430,8 @@ class TextInputPanel(Widget, can_focus=True):
     style: Reactive[str] = Reactive("")
     height: Reactive[int] = Reactive(None)
 
-    def __init__(self, *, name: str = None, height: int = None, val:str = '', row:int = None, default_text:str = None, cols:List = None) -> None:
+    def __init__(self, *, name: str = None, height: int = None, val:str = '',
+            row:int = None, cols:List = None, default_text:str = None) -> None:
         super().__init__(name=name)
         self.height = height
         self.text = default_text or "" # FIXFIX temporary for testing
@@ -482,7 +482,8 @@ class TextPanel(Widget, can_focus=True):
     style: Reactive[str] = Reactive("")
     height: Reactive[int] = Reactive(None)
 
-    def __init__(self, *, name: str = None, height: int = None, val:str = '', row:int = None, cols:List = None) -> None:
+    def __init__(self, *, name: str = None, height: int = None, val:str = '',
+            row:int = None, cols:List = None) -> None:
         super().__init__(name=name)
         self.height = height
         self.text = ""
@@ -593,18 +594,19 @@ class GridTest(App):
         await self.output.update(Markdown('\n\n'.join(self.output_md), hyperlinks=True))
         self.refresh() # ???
 
-        # another janky timer!
+        # another janky timer to scroll to the bottom of the ScrollView after update!
         def _scroll():
             self.output.target_y = self.output.max_scroll_y
             self.output.y = self.output.target_y
         self.set_timer(0.1, _scroll)
 
-    def _get_friendly_id(self):
+    @staticmethod
+    def _get_friendly_id(vals):
         def _smiles_to_id(smiles):
-            return "".join(A+str(smiles.count(A)) if smiles.count(A) else "" for A in "CHONPS")
+            return "".join(atm+str(smiles.count(atm)) if smiles.count(atm) else "" for atm in "CHONPS")
 
-        pr_id = self.vals.get('pdb_id') or self.vals.get('gene_name') or self.vals.get('proteome')
-        sm_id = self.vals.get('pubchem_id') or self.vals.get('sdf') or _smiles_to_id(self.vals.get('smiles'))
+        pr_id = vals.get('pdb_id') or vals.get('gene_name') or vals.get('proteome')
+        sm_id = vals.get('pubchem_id') or vals.get('sdf') or _smiles_to_id(vals.get('smiles'))
 
         if pr_id and sm_id:
             return f"{pr_id}_{sm_id}"
@@ -616,7 +618,8 @@ class GridTest(App):
             self.output_md.append("No proteome or pdb or gene name supplied.")
             await self._update_output()
             return
-        elif self.vals.get("proteome"):
+
+        if self.vals.get("proteome"):
             self.output_md.append(f'Using proteome {self.vals.get("proteome")}')
             await self._update_output()
         elif self.vals.get("pdb_id"):
@@ -630,72 +633,75 @@ class GridTest(App):
             self.output_md.append("No SDF or SMILES or PubChem ID supplied.")
             await self._update_output()
             return
-        else:
-            message_sender.label = "Docking..."
-            message_sender.button_style = "white on dark_green"
-            self.refresh() # ???
 
-            self.output_md.append('## Running docking with params')
+        message_sender.label = "Docking..."
+        message_sender.button_style = "white on dark_green"
+        self.refresh() # updates in realtime
+
+        self.output_md.append('## Running docking with params')
+        await self._update_output()
+        self.output.refresh()
+        self.refresh()
+        log("REFRESH")
+
+        pr_id = self.vals.get('pdb_id') or self.vals.get('gene_name') or self.vals.get('proteome')
+        sm_id = self.vals.get('pubchem_id') or self.vals.get('sdf') or self.vals.get('smiles')
+        out_tsv = Path(OUTDIR, f"{self._get_friendly_id(self.vals)}.tsv").as_posix()
+
+        # docking must be wrapped like this because e.g., the PDB parser emits warnings
+        fout, ferr = io.StringIO(), io.StringIO()
+        with redirect_stdout(fout), redirect_stderr(ferr):
+            dk_gener = run_docking(pr_id, sm_id, out_tsv, docking="equibind")
+
+            inference_path, output_directory = next(dk_gener)
+
+            if inference_path is None or output_directory is None:
+                self.output_md.extend(["Something went wrong! No ligand or PDB with this ID found"])
+                message_sender.label = "Start docking"
+                message_sender.button_style = "white on blue"
+                await self._update_output()
+                return
+
+            # ---------------------------------------------------------------
+            # Progress bar for docking -- max_sdf_confs is not known though?
+            #
+            if len(self.progress_bar.task_ids) == 0:
+                dk_task_id = self.progress_bar.add_task(f"[red]{self._get_friendly_id(self.vals)}:", total = self.max_sdf_confs + 1)
+                assert dk_task_id == 0, "only one progress bar allowed!"
+            else:
+                self.progress_bar.update(0, description=f"[red]{self._get_friendly_id(self.vals)}:")
+                self.progress_bar.reset(0, total = self.max_sdf_confs + 1)
+
+            self.progress_bar.update(0, advance=0)
+            self.progress_panel.refresh()
+            self.refresh()
+
+            err = [] # keep track of errors returned on running docking
+            for p_info in iter(dk_gener):
+                # TODO update to take advantage of p_info = (done, total)
+                self.progress_bar.update(0, advance=1)
+                # Both refreshes are necessary?
+                self.progress_panel.refresh()
+                self.refresh()
+
+                if isinstance(p_info, str):
+                    err.append(p_info)
+
+            # Finished, so set to 100%
+            self.progress_bar.update(0, advance=self.progress_bar.tasks[0].remaining)
+            self.progress_panel.refresh()
+            self.refresh()
+
+        message_sender.label = "Start docking"
+        message_sender.button_style = "white on blue"
+
+        if Path(out_tsv).exists():
+            self.output_md.append(f"Output to {out_tsv}")
             await self._update_output()
 
-            pr_id = self.vals.get('pdb_id') or self.vals.get('gene_name') or self.vals.get('proteome')
-            sm_id = self.vals.get('pubchem_id') or self.vals.get('sdf') or self.vals.get('smiles')
-            out_tsv = Path(OUTDIR, f"{self._get_friendly_id()}.tsv").as_posix()
-
-            # docking must be wrapped like this because e.g., the PDB parser emits warnings
-            fout, ferr = io.StringIO(), io.StringIO()
-            with redirect_stdout(fout), redirect_stderr(ferr):
-                dk_gener = run_docking(pr_id, sm_id, out_tsv, docking="equibind")
-
-                inference_path, output_directory = next(dk_gener)
-
-                if inference_path is None or output_directory is None:
-                    self.output_md.extend(["Something went wrong! No ligand or PDB with this ID found"])
-                    message_sender.label = "Start docking"
-                    message_sender.button_style = "white on blue"
-                    await self._update_output()
-                    return
-
-                # ---------------------------------------------------------------
-                # Progress bar for docking -- max_sdf_confs is not known though?
-                #
-                if len(self.progress_bar.task_ids) == 0:
-                    dk_task_id = self.progress_bar.add_task(f"[red]{self._get_friendly_id()}:", total = self.max_sdf_confs + 1)
-                    assert dk_task_id == 0, "only one progress bar allowed!"
-                else:
-                    self.progress_bar.update(0, description=f"[red]{self._get_friendly_id()}:")
-                    self.progress_bar.reset(0, total = self.max_sdf_confs + 1)
-
-                self.progress_bar.update(0, advance=0)
-                self.progress_panel.refresh()
-                self.refresh()
-
-                err = [] # keep track of errors returned on running docking
-                for p_info in iter(dk_gener):
-                    # TODO update to take advantage of p_info = (done, total)
-                    self.progress_bar.update(0, advance=1)
-                    # Both refreshes are necessary?
-                    self.progress_panel.refresh()
-                    self.refresh()
-
-                    if isinstance(p_info, str):
-                        err.append(p_info)
-
-                # Finished, so set to 100%
-                self.progress_bar.update(0, advance=self.progress_bar.tasks[0].remaining)
-                self.progress_panel.refresh()
-                self.refresh()
-
-            message_sender.label = "Start docking"
-            message_sender.button_style = "white on blue"
-
-            if Path(out_tsv).exists():
-                self.output_md.append(f"Output to {out_tsv}")
-                await self._update_output()
-            
-            if len(err) > 0:
-                self.output_md.extend(err)
-                await self._update_output()
+        if len(err) > 0:
+            self.output_md.extend(err)
+            await self._update_output()
 
 
     async def _download_file(self, message_sender, url, name):

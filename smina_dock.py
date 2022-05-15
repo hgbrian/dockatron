@@ -24,7 +24,6 @@ import re
 import time
 import subprocess
 
-from os.path import join as pjoin
 from pathlib import Path
 from random import random
 from sys import platform
@@ -41,12 +40,12 @@ from scipy.spatial.distance import cdist
 
 from rdconf import rdconf
 
-
 SMINA = "smina"
 GNINA = "gnina"
-DOCK_BIN_D = {SMINA: [pjoin(os.environ['HXROOT'], "apps", "docking", "bin", "smina" + ("_osx" if platform == "darwin" else ""))],
-              GNINA: ["docker", "run", "-v", "/tmp/:/tmp/", "gnina/gnina", "gnina"]}
-OBABEL_BIN = pjoin(os.environ['HXROOT'], "apps", "docking", "bin", "babel" + ("_osx" if platform == "darwin" else ""))
+#DOCK_BIN_D = {SMINA: [pjoin(os.environ['HXROOT'], "apps", "docking", "bin", "smina" + ("_osx" if platform == "darwin" else ""))],
+#              GNINA: ["docker", "run", "-v", "/tmp/:/tmp/", "gnina/gnina", "gnina"]}
+DOCK_BIN_D = {SMINA: "./bin/smina"}
+#OBABEL_BIN = pjoin(os.environ['HXROOT'], "apps", "docking", "bin", "babel" + ("_osx" if platform == "darwin" else ""))
 OBABEL_BIN = "obabel" # problematic binary
 
 DEBUG = False

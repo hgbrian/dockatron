@@ -13,6 +13,7 @@ from tqdm.dask import TqdmCallback
 
 import pandas as pd
 import dask
+
 import smina_dock
 
 tempdir = gettempdir()
@@ -72,12 +73,12 @@ def link_proteome_files(from_proteome_dir:str, to_inference_path:str, sdf_file:s
         to_sdf_filename = from_sdf_path.stem + "_ligand.sdf"
 
     # copy pdb files (many to many)
-    from_pdb_dirs = Path(from_proteome_dir).glob("*")
+    from_pdb_dirs = list(Path(from_proteome_dir).glob("*"))
     for from_pdb_dir in tqdm(from_pdb_dirs, desc="Copying PDB files"):
         subprocess.run(["cp", "-as", from_pdb_dir.as_posix(), to_inference_path.as_posix()], check=True)
 
     # copy sdf (ligand) file (one to many)
-    to_sdf_dirs = Path(to_inference_path).glob("*")
+    to_sdf_dirs = list(Path(to_inference_path).glob("*"))
     for dr in tqdm(to_sdf_dirs, desc="Copying SDF files"):
         subprocess.run(["cp", "-as", from_sdf_path.as_posix(),
             Path(to_inference_path, dr, to_sdf_filename).as_posix()], check=True)
@@ -105,7 +106,7 @@ def run_equibind(proteome_dir: str, sm_id: str, output_dir=None,
     # Start docking
     #
     scores = []
-    df_uniprot = pd.read_csv(f"uniprot_{friendly_proteome_id}.tsv", sep='\t')[["Entry", "Gene names", "Entry name"]]
+    #df_uniprot = pd.read_csv(f"uniprot_{friendly_proteome_id}.tsv", sep='\t')[["Entry", "Gene names", "Entry name"]]
 
     with NamedTemporaryFile('w', suffix=".yml") as config_file, \
         TemporaryDirectory() as sdf_dir, \
